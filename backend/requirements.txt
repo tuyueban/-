@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+pymysql
+python-dotenv
+httpx
+beautifulsoup4
+apscheduler
+pydantic

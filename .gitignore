@@ -3,3 +3,14 @@ venv/
 __pycache__/
 *.pyc
 backend/uvicorn.*.log
+.idea/
+logs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+dist/
+build/
+*.log
+*.sqlite
+*.db

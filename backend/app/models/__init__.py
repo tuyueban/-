@@ -1,0 +1,31 @@
+from app.models.music import (
+    AiHeatAnalysis,
+    Artist,
+    ArtistChart,
+    ArtistChartItem,
+    Chart,
+    ChartSong,
+    EtlLog,
+    HeatScoreDaily,
+    MusicStyle,
+    PlatformSong,
+    Song,
+    SongArtist,
+    SongMetric,
+)
+
+__all__ = [
+    "AiHeatAnalysis",
+    "Artist",
+    "ArtistChart",
+    "ArtistChartItem",
+    "Chart",
+    "ChartSong",
+    "EtlLog",
+    "HeatScoreDaily",
+    "MusicStyle",
+    "PlatformSong",
+    "Song",
+    "SongArtist",
+    "SongMetric",
+]

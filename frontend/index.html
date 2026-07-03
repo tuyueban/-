@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>三大音乐平台歌曲热度分析系统</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">M</span>
+        <div>
+          <strong>歌曲热度分析</strong>
+          <small>Music Hot Analysis</small>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="主导航">
+        <button class="nav-item active" type="button" data-view="dashboard" title="首页大盘">
+          <span class="nav-icon">H</span>
+          <b>首页大盘</b>
+        </button>
+        <button class="nav-item" type="button" data-view="styles" title="风格榜单">
+          <span class="nav-icon">S</span>
+          <b>风格榜单</b>
+        </button>
+        <button class="nav-item" type="button" data-view="crossPlatform" title="跨平台分析">
+          <span class="nav-icon">C</span>
+          <b>跨平台分析</b>
+        </button>
+      </nav>
+
+      <div class="sidebar-status">
+        <div>
+          <span class="pulse"></span>
+          <span id="apiStatus">连接后端中</span>
+        </div>
+        <small id="updateTime">更新时间：--</small>
+      </div>
+    </aside>
+
+    <main class="shell">
+      <header class="topbar">
+        <div class="page-heading">
+          <p class="eyebrow" id="pageEyebrow">三大音乐平台公开榜单热度分析系统</p>
+          <h1 id="pageTitle">首页数据大盘</h1>
+          <p id="pageSubtitle">系统基于三大音乐平台公开榜单热度分析</p>
+        </div>
+
+        <div class="top-actions">
+          <form class="search" id="searchForm">
+            <input id="searchInput" type="search" placeholder="搜索歌曲、歌手或风格" autocomplete="off" />
+            <button type="submit" title="搜索" aria-label="搜索">⌕</button>
+            <div class="search-popover" id="searchResults"></div>
+          </form>
+          <button class="icon-button" type="button" title="通知" aria-label="通知">!</button>
+        </div>
+      </header>
+
+      <section class="view active" id="dashboardView">
+        <section class="two-column dashboard-rankings">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">歌曲热度榜区</p>
+                <h2>歌曲热度日榜 TOP50</h2>
+              </div>
+              <button class="ghost-button" type="button" data-more="daily">查看完整榜单 →</button>
+            </div>
+            <div id="dailyHotList"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">歌曲热度榜区</p>
+                <h2>歌曲热度周榜预览</h2>
+              </div>
+              <button class="ghost-button" type="button" data-more="weekly">查看完整榜单 →</button>
+            </div>
+            <p class="muted" id="weeklyMessage"></p>
+            <div id="weeklyHotList"></div>
+          </article>
+        </section>
+
+        <section class="dashboard-secondary-section">
+          <article class="panel artist-panel artist-ranking-card">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">热门歌手榜区</p>
+                <h2>热门歌手总榜 TOP50</h2>
+              </div>
+              <button class="ghost-button" type="button" data-more="artists">查看完整榜单 →</button>
+            </div>
+            <div class="artist-ranking-host" id="artistRankList"></div>
+          </article>
+
+          <div class="mini-stack mini-rankings-grid">
+            <article class="panel compact mini-ranking-card">
+              <div class="panel-head">
+                <h2>近期飙升歌曲榜</h2>
+                <button class="ghost-button" type="button" data-more="rising">查看 →</button>
+              </div>
+              <div class="mini-list" id="risingList"></div>
+            </article>
+            <article class="panel compact mini-ranking-card">
+              <div class="panel-head">
+                <h2>新歌总榜</h2>
+                <button class="ghost-button" type="button" data-more="newSongs">查看 →</button>
+              </div>
+              <div class="mini-list" id="newSongList"></div>
+            </article>
+            <article class="panel compact mini-ranking-card">
+              <div class="panel-head">
+                <h2>评论热度观察榜</h2>
+                <button class="ghost-button" type="button" data-more="interaction">查看 →</button>
+              </div>
+              <div class="mini-list" id="interactionHeatList"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">风格分布</p>
+              <h2>热门歌曲风格分布</h2>
+              <p class="muted">基于近期榜单数据统计，展示当前最受欢迎的歌曲风格类型分布情况</p>
+            </div>
+            <span id="styleSummary">等待榜单数据</span>
+          </div>
+          <div class="treemap" id="styleTreemap"></div>
+        </section>
+
+        <section class="soft-note" id="qualityNote">
+          数据来源：三大音乐平台公开榜单及真实采集到的用户评论数据。评论数仅在真实存在时展示，不参与跨平台综合热度主排序。
+        </section>
+      </section>
+
+      <section class="view" id="listView">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow" id="listEyebrow">TOP50</p>
+            <h2 id="listTitle">完整榜单</h2>
+          </div>
+          <button class="ghost-button" type="button" data-view="dashboard" title="返回首页大盘">返回</button>
+        </div>
+        <article class="panel">
+          <div id="listContent"></div>
+        </article>
+      </section>
+
+      <section class="view" id="stylesView">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">STYLE CENTER</p>
+            <h2>风格榜单中心</h2>
+          </div>
+          <button class="ghost-button hidden" type="button" id="backToStyles" title="返回风格榜单中心">返回</button>
+        </div>
+        <div id="styleOverview"></div>
+        <div class="style-grid" id="styleCards"></div>
+        <div class="style-detail hidden" id="styleDetail"></div>
+      </section>
+
+      <section class="view" id="crossPlatformView">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">CROSS PLATFORM</p>
+            <h2>跨平台热度重合分析</h2>
+          </div>
+          <span class="date-pill" id="crossPlatformDate">数据日期：--</span>
+        </div>
+        <div id="crossPlatformContent"></div>
+      </section>
+
+      <section class="view" id="songView">
+        <div class="detail-layout" id="songDetail"></div>
+      </section>
+
+      <section class="view" id="artistView">
+        <div class="detail-layout" id="artistDetail"></div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

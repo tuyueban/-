@@ -1,0 +1,4 @@
+.env
+__pycache__/
+*.py[cod]
+crawl_run_*.log
