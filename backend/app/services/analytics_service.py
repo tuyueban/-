@@ -78,7 +78,17 @@ class AnalyticsService:
     def get_style_distribution(self, chart_date: date | None = None, days: int = 30, limit: int = 50) -> dict[str, Any]:
         current_date = chart_date or self.latest_chart_date()
         if current_date is None:
-            return {"chart_date": None, "days": days, "total_count": 0, "items": [], "debug": []}
+            return {
+                "chart_date": None,
+                "days": days,
+                "total_count": 0,
+                "total_canonical_songs": 0,
+                "classified_song_count": 0,
+                "unclassified_song_count": 0,
+                "items": [],
+                "debug": [],
+                "unclassified_style_diagnostics": [],
+            }
         start_date = current_date - timedelta(days=max(days, 1) - 1)
 
         rows = self.db.execute(
@@ -90,15 +100,50 @@ class AnalyticsService:
         ).all()
 
         if not rows:
-            return {"chart_date": current_date.isoformat(), "days": days, "total_count": 0, "items": [], "debug": []}
+            return {
+                "chart_date": current_date.isoformat(),
+                "days": days,
+                "total_count": 0,
+                "total_canonical_songs": 0,
+                "classified_song_count": 0,
+                "unclassified_song_count": 0,
+                "items": [],
+                "debug": [],
+                "unclassified_style_diagnostics": [],
+            }
 
         buckets: dict[str, dict[str, Any]] = {}
-        debug_counts: dict[tuple[str, str], int] = {}
+        debug_counts: dict[tuple[str, str | None], int] = {}
+        all_song_keys: set[str] = set()
+        classified_song_styles: dict[str, str] = {}
+        unclassified_diagnostics: dict[str, dict[str, Any]] = {}
 
         for chart, chart_song, song in rows:
+            song_key = _song_identity_key_for_song(song)
+            all_song_keys.add(song_key)
             raw_style, style_name = _style_for_song_chart(song, chart)
             debug_counts[(raw_style, style_name)] = debug_counts.get((raw_style, style_name), 0) + 1
 
+            if not style_name:
+                if song_key in classified_song_styles:
+                    continue
+                unclassified_diagnostics.setdefault(
+                    song_key,
+                    {
+                        "song_name": song.song_name,
+                        "artist_name": song.artist_name,
+                        "chart_name": chart.chart_name,
+                        "chart_type": chart.chart_type,
+                        "raw_style": raw_style,
+                    },
+                )
+                continue
+
+            if song_key in classified_song_styles and classified_song_styles[song_key] != style_name:
+                continue
+
+            classified_song_styles.setdefault(song_key, style_name)
+            unclassified_diagnostics.pop(song_key, None)
             bucket = buckets.setdefault(
                 style_name,
                 {
@@ -115,7 +160,6 @@ class AnalyticsService:
             bucket["raw_styles"].add(raw_style)
             bucket["platforms"].add(chart.platform)
 
-            song_key = _song_identity_key_for_song(song)
             if song_key not in bucket["song_keys"]:
                 bucket["song_keys"].add(song_key)
                 bucket["songs"].append(
@@ -152,25 +196,36 @@ class AnalyticsService:
                 }
             )
 
-        total_count = sum(int(item["count"]) for item in result) or 1
+        classified_song_count = len(classified_song_styles)
+        unclassified_song_count = max(len(all_song_keys) - classified_song_count, 0)
+        denominator = classified_song_count or 1
         for item in result:
-            item["percentage"] = round(int(item["count"]) / total_count * 100, 2)
+            item["percentage"] = round(int(item["count"]) / denominator * 100, 2)
 
         result = ensure_core_styles_visible(result, limit=limit)
         debug = [
             {"raw_style": raw_style, "normalized_style": normalized_style, "count": count}
-            for (raw_style, normalized_style), count in sorted(debug_counts.items(), key=lambda item: (-item[1], item[0][1], item[0][0]))
+            for (raw_style, normalized_style), count in sorted(
+                debug_counts.items(),
+                key=lambda item: (-item[1], item[0][1] or "", item[0][0] or ""),
+            )
         ]
         logger.debug("Style distribution debug: %s", debug)
+        if unclassified_song_count:
+            logger.debug("Unclassified style diagnostics: %s", list(unclassified_diagnostics.values())[:30])
         if not any(item["style"] == "流行" and int(item["count"]) > 0 for item in result):
             logger.debug("未从当前数据中识别到流行风格，请检查 chart_name / genre 映射。")
 
         return {
             "chart_date": current_date.isoformat(),
             "days": days,
-            "total_count": sum(int(item["count"]) for item in result),
+            "total_count": classified_song_count,
+            "total_canonical_songs": len(all_song_keys),
+            "classified_song_count": classified_song_count,
+            "unclassified_song_count": unclassified_song_count,
             "items": result[:limit],
             "debug": debug,
+            "unclassified_style_diagnostics": list(unclassified_diagnostics.values())[:50],
         }
 
     def style_buckets(self, chart_date: date | None = None, limit: int = 50) -> list[dict[str, Any]]:
@@ -340,14 +395,7 @@ class AnalyticsService:
         items = [
             {
                 "rank": index,
-                "song_id": song.song_id,
-                "song_name": song.song_name,
-                "artist_name": song.artist_name,
-                "display_artist_name": song.artist_name,
-                "artist_names": self._artist_names_for_song(song.song_id),
-                "primary_artist_name": self._primary_artist_name_for_song(song.song_id) or song.artist_name,
-                "cover_url": self._cover_for_song(song.song_id),
-                "artist_avatar_url": self._artist_avatar_for_name(song.artist_name),
+                **self._song_display_fields(song, avatar_artist_name=song.artist_name),
                 "comment_count": comment_count,
                 "platform_count": platform_count,
                 "data_completeness_score": _float(completeness_score),
@@ -1450,19 +1498,7 @@ class AnalyticsService:
 
     def _heat_row(self, score: HeatScoreDaily, song: Song) -> dict[str, Any]:
         item = AnalyticsService._heat_score_only(score)
-        item.update(
-            {
-                "song_id": song.song_id,
-                "song_name": song.song_name,
-                "artist_name": song.artist_name,
-                "display_artist_name": song.artist_name,
-                "artist_names": self._artist_names_for_song(song.song_id),
-                "primary_artist_name": self._primary_artist_name_for_song(song.song_id) or song.artist_name,
-                "album_name": song.album_name,
-                "cover_url": self._cover_for_song(song.song_id),
-                "artist_avatar_url": self._artist_avatar_for_name(self._primary_artist_name_for_song(song.song_id) or song.artist_name),
-            }
-        )
+        item.update(self._song_display_fields(song))
         return item
 
     @staticmethod
@@ -1491,15 +1527,21 @@ class AnalyticsService:
             "chart_date": chart_song.chart_date.isoformat(),
             "rank": chart_song.rank,
             "rank_score": _float(chart_song.rank_score),
+            **self._song_display_fields(song),
+        }
+
+    def _song_display_fields(self, song: Song, avatar_artist_name: str | None = None) -> dict[str, Any]:
+        primary_artist_name = self._primary_artist_name_for_song(song.song_id) or song.artist_name
+        return {
             "song_id": song.song_id,
             "song_name": song.song_name,
             "artist_name": song.artist_name,
             "display_artist_name": song.artist_name,
             "artist_names": self._artist_names_for_song(song.song_id),
-            "primary_artist_name": self._primary_artist_name_for_song(song.song_id) or song.artist_name,
+            "primary_artist_name": primary_artist_name,
             "album_name": song.album_name,
             "cover_url": self._cover_for_song(song.song_id),
-            "artist_avatar_url": self._artist_avatar_for_name(self._primary_artist_name_for_song(song.song_id) or song.artist_name),
+            "artist_avatar_url": self._artist_avatar_for_name(avatar_artist_name if avatar_artist_name is not None else primary_artist_name),
         }
 
     def _cover_for_song(self, song_id: int) -> str | None:
@@ -1820,14 +1862,14 @@ def _platform_display_name(platform: str | None) -> str:
     code = _platform_code(platform)
     return names.get(code, platform or "未知平台")
 
-def _style_for_song_chart(song: Song, chart: Chart) -> tuple[str, str]:
+def _style_for_song_chart(song: Song, chart: Chart) -> tuple[str, str | None]:
     candidates = _style_candidates(song, chart)
     for candidate in candidates:
         normalized = normalize_style_name(candidate)
-        if normalized != "其他":
+        if normalized:
             return str(candidate), normalized
-    raw = next((str(candidate) for candidate in candidates if candidate), "其他")
-    return raw, "其他"
+    raw = next((str(candidate) for candidate in candidates if candidate), "")
+    return raw, None
 
 def _style_candidates(song: Song, chart: Chart) -> list[str]:
     values: list[str] = []

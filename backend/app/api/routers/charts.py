@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Query
 
-from app.services import AnalyticsService
+from app.api.route_utils import analytics_call, items_response
 
 
 router = APIRouter(prefix="/charts", tags=["charts"])
@@ -10,21 +10,18 @@ router = APIRouter(prefix="/charts", tags=["charts"])
 
 @router.get("/dashboard")
 def dashboard(target_date: date | None = None) -> dict[str, object]:
-    with AnalyticsService() as service:
-        return service.dashboard(target_date=target_date)
+    return analytics_call(lambda service: service.dashboard(target_date=target_date))
 
 
 @router.get("/daily-hot")
 def daily_hot(score_date: date | None = None, limit: int = Query(default=50, ge=1, le=500)) -> dict[str, object]:
-    with AnalyticsService() as service:
-        items = service.daily_hot(score_date=score_date, limit=limit)
-    return {"items": items, "count": len(items)}
+    items = analytics_call(lambda service: service.daily_hot(score_date=score_date, limit=limit))
+    return items_response(items)
 
 
 @router.get("/weekly-hot")
 def weekly_hot(end_date: date | None = None, limit: int = Query(default=50, ge=1, le=500)) -> dict[str, object]:
-    with AnalyticsService() as service:
-        items = service.weekly_hot(end_date=end_date, limit=limit)
+    items = analytics_call(lambda service: service.weekly_hot(end_date=end_date, limit=limit))
     message = _weekly_message(items)
     return {"items": items, "count": len(items), "message": message}
 
@@ -47,22 +44,19 @@ def _weekly_message(items: list[dict[str, object]]) -> str:
 
 @router.get("/rising")
 def rising(score_date: date | None = None, limit: int = Query(default=50, ge=1, le=500)) -> dict[str, object]:
-    with AnalyticsService() as service:
-        return service.rising_result(score_date=score_date, limit=limit)
+    return analytics_call(lambda service: service.rising_result(score_date=score_date, limit=limit))
 
 
 @router.get("/new-songs")
 def new_songs(chart_date: date | None = None, limit: int = Query(default=50, ge=1, le=500)) -> dict[str, object]:
-    with AnalyticsService() as service:
-        items = service.new_songs(chart_date=chart_date, limit=limit)
-    return {"items": items, "count": len(items)}
+    items = analytics_call(lambda service: service.new_songs(chart_date=chart_date, limit=limit))
+    return items_response(items)
 
 
 @router.get("/interaction-heat")
 def interaction_heat(metric_date: date | None = None, limit: int = Query(default=50, ge=1, le=500)) -> dict[str, object]:
-    with AnalyticsService() as service:
-        items = service.interaction_heat(metric_date=metric_date, limit=limit)
-    return {"items": items, "count": len(items)}
+    items = analytics_call(lambda service: service.interaction_heat(metric_date=metric_date, limit=limit))
+    return items_response(items)
 
 
 @router.get("/platform")
@@ -73,14 +67,15 @@ def platform_chart(
     days: int = Query(default=30, ge=1, le=90),
     limit: int = Query(default=50, ge=1, le=500),
 ) -> dict[str, object]:
-    with AnalyticsService() as service:
-        items = service.chart_songs(
+    items = analytics_call(
+        lambda service: service.chart_songs(
             chart_date=chart_date,
             platform=platform,
             chart_name=chart_name,
             limit=limit,
         )
-    return {"items": items, "count": len(items)}
+    )
+    return items_response(items)
 
 @router.get("/style-buckets")
 def style_buckets(
@@ -88,8 +83,7 @@ def style_buckets(
     days: int = Query(default=30, ge=1, le=90),
     limit: int = Query(default=50, ge=1, le=500),
 ) -> dict[str, object]:
-    with AnalyticsService() as service:
-        data = service.get_style_distribution(chart_date=chart_date, days=days, limit=limit)
+    data = analytics_call(lambda service: service.get_style_distribution(chart_date=chart_date, days=days, limit=limit))
 
     return {
         **data,

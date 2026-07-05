@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from os import getenv
@@ -156,6 +157,52 @@ def extract_metric_values_from_text(
         source_url=source_url,
         comment_count=_extract_count_by_patterns(text, ("comment", "评论")),
     )
+
+
+def fetch_public_comment_attempt(
+    *, crawler: Any, song: ChartSongItem, identifier_type: str, identifier: str, source_name: str, source_url: str,
+    request: Callable[[], Any], extract_comment_count: Callable[[dict[str, Any]], int | None],
+    non_object_fail_reason: str, request_fail_prefix: str,
+) -> MetricValues:
+    cached_comment_count = crawler.cached_comment_count(identifier_type, identifier)
+    if cached_comment_count is not None:
+        return MetricValues(source_name=f"{source_name}_cache", source_url=source_url, comment_count=cached_comment_count)
+    if crawler.has_recent_metric_failure(identifier_type, identifier):
+        return MetricValues(source_name=f"{source_name}_failure_cache", source_url=source_url, fail_reason="skipped by recent failure cache")
+
+    response_meta = {"status_code": None, "content_type": None, "snippet": None}
+    comment_count: int | None = None
+    fail_reason: str | None = None
+    try:
+        response = request()
+        response_meta.update(status_code=response.status_code, content_type=response.headers.get("content-type"), snippet=response.text)
+        response.raise_for_status()
+        data = parse_json_or_jsonp(response.text)
+        comment_count = extract_comment_count(data) if isinstance(data, dict) else None
+        fail_reason = None if isinstance(data, dict) else non_object_fail_reason
+        if comment_count is None:
+            fail_reason = fail_reason or "comment_count not found"
+    except Exception as exc:  # noqa: BLE001
+        fail_reason = f"{request_fail_prefix}: {exc}"
+
+    if comment_count is None:
+        crawler.store_comment_failure(identifier_type, identifier)
+        log_comment_attempt_failure(
+            platform=crawler.platform_name,
+            song=song,
+            source_name=source_name,
+            source_url=source_url,
+            identifier_type=identifier_type,
+            identifier=identifier,
+            status_code=response_meta["status_code"],
+            response_content_type=response_meta["content_type"],
+            response_snippet=response_meta["snippet"],
+            fail_reason=fail_reason or "comment_count not found",
+        )
+    else:
+        crawler.store_comment_success(identifier_type, identifier, comment_count)
+
+    return MetricValues(source_name=source_name, source_url=source_url, comment_count=comment_count, fail_reason=fail_reason)
 
 
 def _extract_from_response_text(source_name: str, source_url: str, text: str) -> MetricValues:

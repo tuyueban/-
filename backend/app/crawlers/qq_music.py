@@ -1,34 +1,40 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+import logging
+import re
+from datetime import date
 from os import getenv
 from typing import Any
 from urllib.parse import urlencode
 
 from app.crawlers.base import BaseMusicCrawler
 from app.crawlers.dtos import ArtistChartConfig, ArtistChartItem, ChartConfig, ChartSongItem, SongMetricItem
+from app.crawlers.item_builders import build_artist_chart_item, build_chart_song_item
 from app.crawlers.metric_sources import (
     MetricValues,
     build_metric_item,
     fetch_configured_metric_attempts,
-    log_comment_attempt_failure,
+    fetch_public_comment_attempt,
     parse_extra_metadata,
-    parse_json_or_jsonp,
 )
-from app.crawlers.utils import clean_artist_name, clean_song_name, detect_version_type, extract_artist_names, join_artists, parse_count
+from app.crawlers.utils import extract_artist_names, join_artists, parse_count, split_artist_names
+
+
+logger = logging.getLogger(__name__)
 
 
 class QQMusicCrawler(BaseMusicCrawler):
     platform_key = "qq"
     platform_name = "QQ音乐"
     toplist_api = "https://u.y.qq.com/cgi-bin/musicu.fcg"
+    search_api = "https://c.y.qq.com/splcloud/fcgi-bin/smartbox_new.fcg"
     comment_api = "https://c.y.qq.com/base/fcgi-bin/fcg_global_comment_h5.fcg"
     chart_configs = (
         ChartConfig("qq_hot", "热歌榜", "hot", "26"),
         ChartConfig("qq_new", "新歌榜", "new", "27"),
         ChartConfig("qq_soaring", "飙升榜", "soaring", "62"),
-        ChartConfig("qq_popular_index", "流行指数榜", "popular_index", "4"),
+        ChartConfig("qq_popular_index", "流行指数榜", "popular_index", "4", style_key="pop", style_name="流行"),
     )
     chart_configs = chart_configs + (
         ChartConfig("qq_rap", "说唱榜", "genre", "58", style_key="rap", style_name="说唱 / Hip-Hop"),
@@ -44,6 +50,112 @@ class QQMusicCrawler(BaseMusicCrawler):
         ArtistChartConfig("qq_artist_top", "歌手榜", "artist_hot", "singer_list"),
     )
 
+    def search_song(self, keyword: str) -> ChartSongItem | None:
+        logger.info("QQ搜索开始 keyword=%s", keyword)
+        headers = {
+            "Referer": "https://y.qq.com/",
+            "Accept": "application/json,text/javascript,*/*;q=0.1",
+        }
+        response = self.client.get(
+            self.search_api,
+            params={
+                "key": keyword,
+                "format": "json",
+                "inCharset": "utf8",
+                "outCharset": "utf-8",
+            },
+            headers=headers,
+        )
+        logger.info("QQ搜索请求URL %s", response.request.url)
+        logger.info("QQ搜索HTTP状态码 %s", response.status_code)
+        logger.info("QQ搜索返回前500字符 %s", response.text[:500])
+        response.raise_for_status()
+
+        raw_songs = _extract_smartbox_song_list(response.json())
+        logger.info("QQ搜索返回数量 %s", len(raw_songs))
+
+        candidates = [
+            candidate
+            for raw in raw_songs[:20]
+            if (candidate := self._search_candidate(self._song_detail(raw) or raw)) is not None
+        ]
+        for candidate in candidates:
+            logger.info(
+                "QQ候选歌曲 song=%s artist=%s album=%s songmid=%s",
+                candidate.song_name,
+                candidate.artist_name,
+                candidate.album_name,
+                candidate.platform_song_mid,
+            )
+
+        if not candidates:
+            logger.info("QQ最终匹配结果 None")
+            return None
+
+        scored = [(candidate, _qq_match_score(keyword, candidate)) for candidate in candidates]
+        scored.sort(key=lambda item: item[1], reverse=True)
+        best, score = scored[0]
+
+        logger.info(
+            "QQ最终匹配结果 score=%s song=%s artist=%s album=%s songmid=%s",
+            score, best.song_name, best.artist_name, best.album_name, best.platform_song_mid,
+        )
+        logger.info("QQ最终SongSnapshot %s", best)
+        return best
+
+    def _song_detail(self, raw: dict[str, Any]) -> dict[str, Any] | None:
+        song_mid = str(raw.get("mid") or raw.get("songmid") or "").strip()
+        if not song_mid:
+            return None
+        payload = _qq_song_detail_payload(song_mid)
+        try:
+            response = self.client.post(
+                self.toplist_api,
+                json=payload,
+                headers={"Referer": "https://y.qq.com/", "Accept": "application/json,text/javascript,*/*;q=0.1"},
+            )
+            logger.info("QQ歌曲详情请求URL %s", response.request.url)
+            logger.info("QQ歌曲详情HTTP状态码 %s", response.status_code)
+            logger.info("QQ歌曲详情返回前500字符 %s", response.text[:500])
+            response.raise_for_status()
+            detail = (((response.json().get("req_1") or {}).get("data") or {}).get("track_info") or {})
+            return detail if isinstance(detail, dict) and detail else None
+        except Exception:
+            logger.exception("QQ歌曲详情接口失败 songmid=%s", song_mid)
+            return None
+
+    def _search_candidate(self, raw: dict[str, Any]) -> ChartSongItem | None:
+        song_id = str(raw.get("id") or raw.get("songid") or "")
+        song_mid = str(raw.get("mid") or raw.get("songmid") or "")
+        if not song_id and not song_mid:
+            return None
+        album = raw.get("album") or {}
+        album_mid = album.get("mid") or album.get("pmid")
+        singers = _qq_singer_items(raw.get("singer"))
+        raw_song_name = str(raw.get("title") or raw.get("name") or raw.get("songname") or "")
+        raw_artist_name = join_artists(singers)
+        raw["duration"] = raw.get("interval")
+        raw["release_time"] = raw.get("time_public") or album.get("time_public")
+        return build_chart_song_item(
+            platform=self.platform_name,
+            chart=ChartConfig("qq_search", "搜索结果", "explore", "search"),
+            rank=1,
+            artist_names=extract_artist_names(singers),
+            raw_song_name=raw_song_name,
+            raw_artist_name=raw_artist_name,
+            platform_song_id=song_id or song_mid,
+            chart_date=date.today(),
+            raw_metadata=raw,
+            source_url=f"https://y.qq.com/n/ryqq/search?w={keyword_safe(raw_song_name)}",
+            album_name=album.get("name") or raw.get("albumname"),
+            album_id=str(album.get("id") or "") or None,
+            album_mid=str(album_mid or "") or None,
+            platform_song_mid=song_mid or None,
+            song_url=f"https://y.qq.com/n/ryqq/songDetail/{song_mid or song_id}",
+            cover_url=_qq_cover_url(album_mid),
+            artist_avatar_url=_qq_singer_avatar_url(_first_singer_mid(singers)),
+        )
+
     def fetch_chart(
         self, chart: ChartConfig, chart_date: date, top_n: int
     ) -> list[ChartSongItem]:
@@ -55,15 +167,16 @@ class QQMusicCrawler(BaseMusicCrawler):
                 "param": {"topId": int(chart.source_id), "offset": 0, "num": top_n, "period": ""},
             },
         }
-        data = self.request_json(
-            "GET",
-            self.toplist_api,
-            params={
-                "format": "json",
-                "data": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-            },
-            headers={"Referer": "https://y.qq.com/"},
-        )
+        params = {
+            "format": "json",
+            "data": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        }
+        response = self.client.get(self.toplist_api, params=params, headers={"Referer": "https://y.qq.com/"})
+        logger.info("QQ榜单接口状态 chart=%s status=%s", chart.key, response.status_code)
+        logger.info("QQ榜单接口URL %s", response.request.url)
+        logger.info("QQ榜单接口返回前500字符 %s", response.text[:500])
+        response.raise_for_status()
+        data = response.json()
         detail = ((data.get("req_1") or {}).get("data") or {})
         raw_songs = _extract_song_list(detail)
         source_url = f"https://y.qq.com/n/ryqq/toplist/{chart.source_id}"
@@ -81,33 +194,24 @@ class QQMusicCrawler(BaseMusicCrawler):
             raw_artist_name = join_artists(raw.get("singer") or [])
             artist_names = extract_artist_names(raw.get("singer") or [])
             items.append(
-                ChartSongItem(
+                build_chart_song_item(
                     platform=self.platform_name,
-                    chart_name=chart.name,
-                    chart_type=chart.chart_type,
+                    chart=chart,
                     rank=rank,
-                    song_name=clean_song_name(raw_song_name),
-                    artist_name=clean_artist_name(raw_artist_name),
+                    artist_names=artist_names,
                     raw_song_name=raw_song_name,
                     raw_artist_name=raw_artist_name,
-                    display_artist_name=raw_artist_name,
-                    artist_names=artist_names,
-                    primary_artist_name=artist_names[0] if artist_names else None,
-                    version_type=detect_version_type(raw_song_name),
-                    album_name=str(album.get("name") or "") or None,
                     platform_song_id=song_id,
+                    chart_date=chart_date,
+                    raw_metadata=raw,
+                    source_url=source_url,
+                    album_name=str(album.get("name") or "") or None,
                     platform_song_mid=song_mid or None,
                     album_id=str(album.get("id") or "") or None,
                     album_mid=str(album_mid or "") or None,
-                    extra_metadata=json.dumps(raw, ensure_ascii=False),
                     song_url=f"https://y.qq.com/n/ryqq/songDetail/{song_mid or song_id}",
                     cover_url=_qq_cover_url(album_mid),
                     artist_avatar_url=_qq_singer_avatar_url(singer_mid),
-                    chart_date=chart_date,
-                    collect_time=datetime.now(),
-                    source_url=source_url,
-                    style_key=chart.style_key,
-                    style_name=chart.style_name,
                 )
             )
         return items
@@ -160,19 +264,17 @@ class QQMusicCrawler(BaseMusicCrawler):
             if not platform_artist_id or not artist_name:
                 continue
             items.append(
-                ArtistChartItem(
+                build_artist_chart_item(
                     platform=self.platform_name,
-                    chart_name=chart.name,
-                    chart_type=chart.chart_type,
+                    chart=chart,
                     rank=rank,
                     artist_name=artist_name,
                     platform_artist_id=platform_artist_id,
+                    chart_date=chart_date,
+                    raw_metadata=raw,
+                    source_url=source_url,
                     artist_avatar_url=_qq_singer_avatar_url(artist_mid),
                     artist_url=f"https://y.qq.com/n/ryqq/singer/{platform_artist_id}",
-                    extra_metadata=json.dumps(raw, ensure_ascii=False),
-                    chart_date=chart_date,
-                    collect_time=datetime.now(),
-                    source_url=source_url,
                 )
             )
         return items
@@ -219,19 +321,6 @@ class QQMusicCrawler(BaseMusicCrawler):
         }
         source_name = _qq_source_name(identifier_type, param_name)
         source_url = f"{self.comment_api}?{urlencode(params)}"
-        cached_comment_count = self.cached_comment_count(identifier_type, identifier)
-        if cached_comment_count is not None:
-            return MetricValues(
-                source_name=f"{source_name}_cache",
-                source_url=source_url,
-                comment_count=cached_comment_count,
-            )
-        if self.has_recent_metric_failure(identifier_type, identifier):
-            return MetricValues(
-                source_name=f"{source_name}_failure_cache",
-                source_url=source_url,
-                fail_reason="skipped by recent failure cache",
-            )
         headers = {
             "Referer": "https://y.qq.com/",
             "Origin": "https://y.qq.com",
@@ -241,48 +330,25 @@ class QQMusicCrawler(BaseMusicCrawler):
         cookie = getenv("QQ_COOKIE")
         if cookie:
             headers["Cookie"] = cookie
-        fail_reason = None
-        status_code = None
-        content_type = None
-        snippet = None
-        comment_count = None
-        try:
-            response = self.client.get(self.comment_api, params=params, headers=headers)
-            status_code = response.status_code
-            content_type = response.headers.get("content-type")
-            snippet = response.text
-            response.raise_for_status()
-            data = parse_json_or_jsonp(response.text)
-            if isinstance(data, dict):
-                comment_count = _extract_qq_comment_count(data)
-            else:
-                fail_reason = "QQ comment response is not JSON/JSONP object"
-            if comment_count is None:
-                fail_reason = fail_reason or "comment_count not found"
-        except Exception as exc:  # noqa: BLE001
-            fail_reason = f"QQ comment request failed: {exc}"
 
-        if comment_count is None:
-            self.store_comment_failure(identifier_type, identifier)
-            log_comment_attempt_failure(
-                platform=self.platform_name,
-                song=song,
-                source_name=source_name,
-                source_url=source_url,
-                identifier_type=identifier_type,
-                identifier=identifier,
-                status_code=status_code,
-                response_content_type=content_type,
-                response_snippet=snippet,
-                fail_reason=fail_reason or "comment_count not found",
-            )
-        else:
-            self.store_comment_success(identifier_type, identifier, comment_count)
-        return MetricValues(
+        def request_comment() -> Any:
+            response = self.client.get(self.comment_api, params=params, headers=headers)
+            logger.info("QQ评论接口状态 source=%s status=%s", source_name, response.status_code)
+            logger.info("QQ评论接口URL %s", response.request.url)
+            logger.info("QQ评论接口返回前500字符 %s", response.text[:500])
+            return response
+
+        return fetch_public_comment_attempt(
+            crawler=self,
+            song=song,
+            identifier_type=identifier_type,
+            identifier=identifier,
             source_name=source_name,
             source_url=source_url,
-            comment_count=comment_count,
-            fail_reason=fail_reason,
+            request=request_comment,
+            extract_comment_count=_extract_qq_comment_count,
+            non_object_fail_reason="QQ comment response is not JSON/JSONP object",
+            request_fail_prefix="QQ comment request failed",
         )
 
 
@@ -300,6 +366,31 @@ def _extract_song_list(detail: dict[str, Any]) -> list[dict[str, Any]]:
     return songs
 
 
+def _qq_song_detail_payload(song_mid: str) -> dict[str, Any]:
+    return {
+        "comm": {"ct": 11, "cv": 0, "format": "json", "inCharset": "utf-8", "outCharset": "utf-8"},
+        "req_1": {
+            "module": "music.pf_song_detail_svr",
+            "method": "get_song_detail_yqq",
+            "param": {"song_mid": song_mid},
+        },
+    }
+
+
+def _extract_smartbox_song_list(data: dict[str, Any]) -> list[dict[str, Any]]:
+    song = (((data.get("data") or {}).get("song") or {}) if isinstance(data.get("data"), dict) else {})
+    raw_items = song.get("itemlist") or []
+    return [item for item in raw_items if isinstance(item, dict)]
+
+
+def _qq_singer_items(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, str):
+        return [{"name": name} for name in split_artist_names(value)]
+    return []
+
+
 def _extract_singer_list(detail: dict[str, Any]) -> list[dict[str, Any]]:
     raw_items = (
         detail.get("singerlist")
@@ -309,6 +400,46 @@ def _extract_singer_list(detail: dict[str, Any]) -> list[dict[str, Any]]:
         or []
     )
     return [item for item in raw_items if isinstance(item, dict)]
+
+
+def _qq_match_score(keyword: str, song: ChartSongItem) -> int:
+    score = 0
+    query = _qq_normalize(keyword)
+    song_name = _qq_normalize(song.song_name)
+    artist_name = _qq_normalize(song.artist_name)
+    album_name = _qq_normalize(song.album_name)
+    query_without_artist = query.replace(artist_name, "", 1) if artist_name and artist_name in query else query
+
+    if song_name and (query == song_name or query_without_artist == song_name):
+        score += 100
+    elif song_name and song_name in query:
+        score += 50
+
+    if artist_name and artist_name in query:
+        score += 100
+        score += 30
+    elif artist_name and any(part and part in query for part in _qq_artist_parts(song.artist_name)):
+        score += 50
+
+    if album_name and album_name in query:
+        score += 20
+
+    return score
+
+
+def _qq_artist_parts(value: str | None) -> list[str]:
+    return [_qq_normalize(part) for part in re.split(r",|/|&|\+|、|，|feat\.?|ft\.?", value or "", flags=re.I)]
+
+
+def _qq_normalize(value: Any) -> str:
+    text = str(value or "").lower()
+    text = re.sub(r"\([^)]*\)|\[[^\]]*\]|（[^）]*）", "", text)
+    text = re.sub(r"\s+", "", text)
+    return re.sub(r"[^\w\u4e00-\u9fff]+", "", text)
+
+
+def keyword_safe(value: Any) -> str:
+    return urlencode({"w": str(value or "")})[2:]
 
 
 def _qq_cover_url(album_mid: Any) -> str | None:

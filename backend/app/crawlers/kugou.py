@@ -1,21 +1,20 @@
 from __future__ import annotations
 
-import json
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 from urllib.parse import urlencode
 
 from app.crawlers.base import BaseMusicCrawler
 from app.crawlers.dtos import ArtistChartConfig, ArtistChartItem, ChartConfig, ChartSongItem, SongMetricItem
+from app.crawlers.item_builders import build_artist_chart_item, build_chart_song_item
 from app.crawlers.metric_sources import (
     MetricValues,
     build_metric_item,
     fetch_configured_metric_attempts,
-    log_comment_attempt_failure,
+    fetch_public_comment_attempt,
     parse_extra_metadata,
-    parse_json_or_jsonp,
 )
-from app.crawlers.utils import clean_artist_name, clean_song_name, detect_version_type, parse_count, split_artist_names, split_artist_title
+from app.crawlers.utils import parse_count, split_artist_names, split_artist_title
 
 
 class KugouMusicCrawler(BaseMusicCrawler):
@@ -74,31 +73,22 @@ class KugouMusicCrawler(BaseMusicCrawler):
                 artist_names = split_artist_names(raw_artist_name)
                 rank = len(items) + 1
                 items.append(
-                    ChartSongItem(
+                    build_chart_song_item(
                         platform=self.platform_name,
-                        chart_name=chart.name,
-                        chart_type=chart.chart_type,
+                        chart=chart,
                         rank=rank,
-                        song_name=clean_song_name(raw_song_name),
-                        artist_name=clean_artist_name(raw_artist_name),
+                        artist_names=artist_names,
                         raw_song_name=raw_song_name,
                         raw_artist_name=raw_artist_name,
-                        display_artist_name=raw_artist_name,
-                        artist_names=artist_names,
-                        primary_artist_name=artist_names[0] if artist_names else None,
-                        version_type=detect_version_type(raw_song_name),
-                        album_name=raw.get("album_name") or raw.get("albumname"),
                         platform_song_id=song_hash,
+                        chart_date=chart_date,
+                        raw_metadata=raw,
+                        source_url=f"https://www.kugou.com/yy/rank/home/1-{chart.source_id}.html",
+                        album_name=raw.get("album_name") or raw.get("albumname"),
                         album_id=str(raw.get("album_id") or raw.get("albumid") or raw.get("album_audio_id") or "") or None,
                         song_hash=song_hash,
-                        extra_metadata=json.dumps(raw, ensure_ascii=False),
                         song_url=f"https://www.kugou.com/song/#hash={song_hash}",
                         cover_url=_normalize_kugou_cover(raw.get("imgurl") or raw.get("image")),
-                        chart_date=chart_date,
-                        collect_time=datetime.now(),
-                        style_key=chart.style_key,
-                        style_name=chart.style_name,
-                        source_url=f"https://www.kugou.com/yy/rank/home/1-{chart.source_id}.html",
                     )
                 )
             page += 1
@@ -140,19 +130,17 @@ class KugouMusicCrawler(BaseMusicCrawler):
                     continue
                 rank = len(items) + 1
                 items.append(
-                    ArtistChartItem(
+                    build_artist_chart_item(
                         platform=self.platform_name,
-                        chart_name=chart.name,
-                        chart_type=chart.chart_type,
+                        chart=chart,
                         rank=rank,
                         artist_name=artist_name,
                         platform_artist_id=artist_id,
+                        chart_date=chart_date,
+                        raw_metadata=raw,
+                        source_url="https://m.kugou.com/singer/list",
                         artist_avatar_url=_normalize_kugou_cover(raw.get("imgurl") or raw.get("image") or raw.get("pic")),
                         artist_url=f"https://www.kugou.com/singer/{artist_id}.html",
-                        extra_metadata=json.dumps(raw, ensure_ascii=False),
-                        chart_date=chart_date,
-                        collect_time=datetime.now(),
-                        source_url="https://m.kugou.com/singer/list",
                     )
                 )
             page += 1
@@ -185,71 +173,28 @@ class KugouMusicCrawler(BaseMusicCrawler):
         }
         source_name = _kugou_source_name(identifier_type)
         source_url = f"{self.comment_api}?{urlencode(params)}"
-        cached_comment_count = self.cached_comment_count(identifier_type, identifier)
-        if cached_comment_count is not None:
-            return MetricValues(
-                source_name=f"{source_name}_cache",
-                source_url=source_url,
-                comment_count=cached_comment_count,
-            )
-        if self.has_recent_metric_failure(identifier_type, identifier):
-            return MetricValues(
-                source_name=f"{source_name}_failure_cache",
-                source_url=source_url,
-                fail_reason="skipped by recent failure cache",
-            )
-        status_code = None
-        content_type = None
-        snippet = None
-        comment_count = None
-        fail_reason = None
-        try:
-            response = self.client.get(
-                self.comment_api,
-                params=params,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
-                    "Referer": song.song_url or "https://www.kugou.com/",
-                    "Accept": "application/json,text/javascript,*/*;q=0.1",
-                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                },
-            )
-            status_code = response.status_code
-            content_type = response.headers.get("content-type")
-            snippet = response.text
-            response.raise_for_status()
-            data = parse_json_or_jsonp(response.text)
-            if isinstance(data, dict):
-                comment_count = _extract_kugou_comment_count(data)
-            else:
-                fail_reason = "Kugou comment response is not JSON/JSONP object"
-            if comment_count is None:
-                fail_reason = fail_reason or "comment_count not found"
-        except Exception as exc:  # noqa: BLE001
-            fail_reason = f"Kugou comment request failed: {exc}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
+            "Referer": song.song_url or "https://www.kugou.com/",
+            "Accept": "application/json,text/javascript,*/*;q=0.1",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        }
 
-        if comment_count is None:
-            self.store_comment_failure(identifier_type, identifier)
-            log_comment_attempt_failure(
-                platform=self.platform_name,
-                song=song,
-                source_name=source_name,
-                source_url=source_url,
-                identifier_type=identifier_type,
-                identifier=identifier,
-                status_code=status_code,
-                response_content_type=content_type,
-                response_snippet=snippet,
-                fail_reason=fail_reason or "comment_count not found",
-            )
-        else:
-            self.store_comment_success(identifier_type, identifier, comment_count)
-
-        return MetricValues(
+        return fetch_public_comment_attempt(
+            crawler=self,
+            song=song,
+            identifier_type=identifier_type,
+            identifier=identifier,
             source_name=source_name,
             source_url=source_url,
-            comment_count=comment_count,
-            fail_reason=fail_reason,
+            request=lambda: self.client.get(
+                self.comment_api,
+                params=params,
+                headers=headers,
+            ),
+            extract_comment_count=_extract_kugou_comment_count,
+            non_object_fail_reason="Kugou comment response is not JSON/JSONP object",
+            request_fail_prefix="Kugou comment request failed",
         )
 
 

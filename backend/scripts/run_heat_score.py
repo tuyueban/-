@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from datetime import date
 from pathlib import Path
@@ -10,8 +9,12 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
+from app.cli import configure_logging, run_json_command  # noqa: E402
 from app.db import init_db  # noqa: E402
 from app.services import AiAnalysisService, HeatScoreService  # noqa: E402
+
+
+logger = configure_logging("backend_run_heat_score")
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+def main() -> dict:
     args = parse_args()
     init_db()
     score_date = date.fromisoformat(args.score_date) if args.score_date else None
@@ -34,8 +37,9 @@ def main() -> None:
                 analysis_date=date.fromisoformat(str(result["score_date"])),
                 limit=20,
             )
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    logger.info("heat score finished")
+    return result
 
 
 if __name__ == "__main__":
-    main()
+    run_json_command(main, logger, "heat score failed", indent=2)

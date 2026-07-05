@@ -53,7 +53,7 @@ def analyze_song_heat(payload: SongHeatAnalysisRequest) -> dict[str, Any]:
 
     try:
         with DetailAiService() as service:
-            item = service.song_analysis(payload.song_id, strict_ai=True)
+            item = service.song_analysis(payload.song_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -67,7 +67,6 @@ def analyze_artist_heat(payload: ArtistHeatAnalysisRequest) -> dict[str, Any]:
             item = service.artist_analysis(
                 artist_name=payload.artist_name,
                 score_date=payload.score_date,
-                strict_ai=True,
             )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

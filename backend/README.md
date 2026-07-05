@@ -78,10 +78,10 @@ final_heat_score = available_platform_avg_score * 0.75 + cross_platform_score * 
 ## 运行脚本
 
 ```powershell
-python ..\scripts\run_crawler.py --platform all
-python ..\scripts\run_crawler.py --platform all --artists-only
-python ..\scripts\run_heat_score.py --date 2026-06-29
-python ..\scripts\run_ai_analysis.py --date 2026-06-29 --limit 20
+python scripts\run_crawler.py --platform all
+python scripts\run_crawler.py --platform all --artists-only
+python scripts\run_heat_score.py --date 2026-06-29
+python scripts\run_ai_analysis.py --date 2026-06-29 --limit 20
 ```
 
 `--limit` 仅用于测试，不建议用于演示或正式数据生成。

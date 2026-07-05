@@ -9,6 +9,7 @@ from app.api.routers import (
     artists_router,
     charts_router,
     crawler_router,
+    explore_router,
     heat_router,
     ops_router,
     reports_router,
@@ -48,12 +49,15 @@ app.include_router(reports_router, prefix=settings.api_prefix)
 app.include_router(ops_router, prefix=settings.api_prefix)
 app.include_router(crawler_router, prefix=settings.api_prefix)
 app.include_router(heat_router, prefix=settings.api_prefix)
+app.include_router(explore_router, prefix=settings.api_prefix)
 
 
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
     start_scheduler()
+    for path in app.openapi().get("paths", {}):
+        print(path, flush=True)
 
 
 @app.get("/health")

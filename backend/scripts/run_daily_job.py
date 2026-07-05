@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 import traceback
@@ -11,6 +10,7 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
+from app.cli import print_json  # noqa: E402
 from app.db import init_db  # noqa: E402
 from app.services import AiAnalysisService, CrawlerService, HeatScoreService  # noqa: E402
 
@@ -83,7 +83,7 @@ def main() -> None:
 
         result["finished_at"] = datetime.now().isoformat(timespec="seconds")
         logger.info("Daily job finished")
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print_json(result, indent=2)
 
     except Exception as exc:
         logger.exception("Daily job failed")
@@ -91,7 +91,7 @@ def main() -> None:
         result["error"] = str(exc)
         result["traceback"] = traceback.format_exc()
         result["finished_at"] = datetime.now().isoformat(timespec="seconds")
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print_json(result, indent=2)
         raise SystemExit(1)
 
 

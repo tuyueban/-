@@ -60,9 +60,9 @@ cross_platform_score = 三个平台分数之和 / 3
 ## 运行脚本
 
 ```bash
-python scripts/run_crawler.py --platform all
-python scripts/run_heat_score.py --date 2026-06-29
-python scripts/run_ai_analysis.py --date 2026-06-29 --limit 20
+python backend/scripts/run_crawler.py --platform all
+python backend/scripts/run_heat_score.py --date 2026-06-29
+python backend/scripts/run_ai_analysis.py --date 2026-06-29 --limit 20
 ```
 
 `--limit` 仅用于测试，不建议用于演示或正式数据生成，否则可能导致日榜、周榜、飙升榜数据不完整。

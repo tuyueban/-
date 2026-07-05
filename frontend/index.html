@@ -25,6 +25,10 @@
           <span class="nav-icon">S</span>
           <b>风格榜单</b>
         </button>
+        <button class="nav-item" type="button" data-view="explore" title="歌曲探索">
+          <span class="nav-icon">E</span>
+          <b>歌曲探索</b>
+        </button>
         <button class="nav-item" type="button" data-view="crossPlatform" title="跨平台分析">
           <span class="nav-icon">C</span>
           <b>跨平台分析</b>
@@ -126,7 +130,7 @@
             <div>
               <p class="eyebrow">风格分布</p>
               <h2>热门歌曲风格分布</h2>
-              <p class="muted">基于近期榜单数据统计，展示当前最受欢迎的歌曲风格类型分布情况</p>
+              <p class="muted">仅统计已识别风格的上榜歌曲，未识别项不纳入分布</p>
             </div>
             <span id="styleSummary">等待榜单数据</span>
           </div>
@@ -173,6 +177,22 @@
           <span class="date-pill" id="crossPlatformDate">数据日期：--</span>
         </div>
         <div id="crossPlatformContent"></div>
+      </section>
+
+      <section class="view" id="exploreView">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">SONG EXPLORER</p>
+            <h2>歌曲探索 / 实时歌曲分析</h2>
+          </div>
+        </div>
+        <article class="panel explorer-search-panel">
+          <form class="explorer-search" id="exploreSearchForm">
+            <input id="exploreKeyword" type="search" placeholder="搜索歌曲，如：晴天、晴天 周杰伦、有何不可" autocomplete="off" />
+            <button class="primary-button" type="submit">搜索</button>
+          </form>
+        </article>
+        <div id="exploreContent"></div>
       </section>
 
       <section class="view" id="songView">

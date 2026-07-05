@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import json
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from app.crawlers.base import BaseMusicCrawler
 from app.crawlers.dtos import ArtistChartConfig, ArtistChartItem, ChartConfig, ChartSongItem, SongMetricItem
+from app.crawlers.item_builders import build_artist_chart_item, build_chart_song_item
 from app.crawlers.metric_sources import (
     MetricValues,
     build_metric_item,
     fetch_configured_metric_attempts,
 )
-from app.crawlers.utils import clean_artist_name, clean_song_name, detect_version_type, extract_artist_names, join_artists, parse_count
+from app.crawlers.utils import extract_artist_names, join_artists, parse_count
 
 
 class NeteaseMusicCrawler(BaseMusicCrawler):
@@ -68,31 +68,22 @@ class NeteaseMusicCrawler(BaseMusicCrawler):
             raw_artist_name = join_artists(artists)
             artist_names = extract_artist_names(artists)
             items.append(
-                ChartSongItem(
+                build_chart_song_item(
                     platform=self.platform_name,
-                    chart_name=chart.name,
-                    chart_type=chart.chart_type,
+                    chart=chart,
                     rank=rank,
-                    song_name=clean_song_name(raw_song_name),
-                    artist_name=clean_artist_name(raw_artist_name),
+                    artist_names=artist_names,
                     raw_song_name=raw_song_name,
                     raw_artist_name=raw_artist_name,
-                    display_artist_name=raw_artist_name,
-                    artist_names=artist_names,
-                    primary_artist_name=artist_names[0] if artist_names else None,
-                    version_type=detect_version_type(raw_song_name),
-                    album_name=_album_name(album),
                     platform_song_id=song_id,
+                    chart_date=chart_date,
+                    raw_metadata=raw,
+                    source_url=source_url,
+                    album_name=_album_name(album),
                     album_id=str(album.get("id") or "") or None,
-                    extra_metadata=json.dumps(raw, ensure_ascii=False),
                     song_url=f"https://music.163.com/song?id={song_id}",
                     cover_url=_album_cover(album),
                     artist_avatar_url=_artist_avatar(artists),
-                    chart_date=chart_date,
-                    collect_time=datetime.now(),
-                    source_url=source_url,
-                    style_key=chart.style_key,
-                    style_name=chart.style_name,
                 )
             )
         return items
@@ -125,19 +116,17 @@ class NeteaseMusicCrawler(BaseMusicCrawler):
             if not artist_id or not artist_name:
                 continue
             items.append(
-                ArtistChartItem(
+                build_artist_chart_item(
                     platform=self.platform_name,
-                    chart_name=chart.name,
-                    chart_type=chart.chart_type,
+                    chart=chart,
                     rank=rank,
                     artist_name=artist_name,
                     platform_artist_id=artist_id,
+                    chart_date=chart_date,
+                    raw_metadata=raw,
+                    source_url=source_url,
                     artist_avatar_url=_artist_raw_avatar(raw),
                     artist_url=f"https://music.163.com/artist?id={artist_id}",
-                    extra_metadata=json.dumps(raw, ensure_ascii=False),
-                    chart_date=chart_date,
-                    collect_time=datetime.now(),
-                    source_url=source_url,
                 )
             )
         return items
