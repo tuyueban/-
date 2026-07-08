@@ -58,6 +58,10 @@ def ensure_schema_extensions() -> None:
         "platform_coverage_score": "DECIMAL(8,2) NULL",
         "dominant_platform": "VARCHAR(50) NULL",
     }
+    song_metric_columns = {
+        "play_count": "BIGINT NULL",
+        "favorite_count": "BIGINT NULL",
+    }
     artist_chart_columns = {
         "style_key": "VARCHAR(50) NULL",
         "style_name": "VARCHAR(100) NULL",
@@ -65,6 +69,7 @@ def ensure_schema_extensions() -> None:
     with engine.begin() as connection:
         _ensure_columns(connection, "PlatformSong", platform_song_columns)
         _ensure_columns(connection, "HeatScoreDaily", heat_score_columns)
+        _ensure_columns(connection, "SongMetric", song_metric_columns)
         _ensure_columns(connection, "ArtistChart", artist_chart_columns)
         _ensure_column_types(
             connection,
@@ -73,6 +78,25 @@ def ensure_schema_extensions() -> None:
                 "song_name": "VARCHAR(300) NOT NULL",
                 "artist_name": "VARCHAR(150) NOT NULL",
                 "album_name": "VARCHAR(300) NULL",
+            },
+        )
+        _ensure_indexes(
+            connection,
+            {
+                "ChartSong": {
+                    "ix_chart_song_date_rank": "(`chart_date`, `rank`)",
+                    "ix_chart_song_song_date": "(`song_id`, `chart_date`)",
+                },
+                "SongMetric": {
+                    "ix_song_metric_date_song": "(`metric_date`, `song_id`)",
+                },
+                "HeatScoreDaily": {
+                    "ix_heat_score_date_score": "(`score_date`, `heat_score`)",
+                    "ix_heat_score_date_delta": "(`score_date`, `rank_delta`)",
+                },
+                "ArtistChartItem": {
+                    "ix_artist_chart_item_date_artist": "(`chart_date`, `artist_id`)",
+                },
             },
         )
 
@@ -96,3 +120,20 @@ def _ensure_columns(connection, table_name: str, columns: dict[str, str]) -> Non
 def _ensure_column_types(connection, table_name: str, columns: dict[str, str]) -> None:  # type: ignore[no-untyped-def]
     for column_name, column_type in columns.items():
         connection.execute(text(f"ALTER TABLE `{table_name}` MODIFY COLUMN `{column_name}` {column_type}"))
+
+
+def _ensure_indexes(connection, indexes: dict[str, dict[str, str]]) -> None:  # type: ignore[no-untyped-def]
+    for table_name, table_indexes in indexes.items():
+        existing_indexes = {
+            row[0]
+            for row in connection.execute(
+                text(
+                    "SELECT INDEX_NAME FROM information_schema.STATISTICS "
+                    "WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table_name"
+                ),
+                {"schema": settings.mysql_database, "table_name": table_name},
+            )
+        }
+        for index_name, columns_sql in table_indexes.items():
+            if index_name not in existing_indexes:
+                connection.execute(text(f"CREATE INDEX `{index_name}` ON `{table_name}` {columns_sql}"))

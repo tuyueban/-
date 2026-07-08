@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.services import DetailAiService
+from app.services import AiSongSearchService, DetailAiService
 
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -29,6 +29,10 @@ class ArtistHeatAnalysisRequest(BaseModel):
     platform_performance: list[dict[str, Any]] = Field(default_factory=list)
     heat_trend: list[dict[str, Any]] = Field(default_factory=list)
     enable_web_search: bool = True
+
+
+class AiSongSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1)
 
 
 def _analysis_response(item: dict[str, Any] | None) -> dict[str, Any]:
@@ -72,3 +76,9 @@ def analyze_artist_heat(payload: ArtistHeatAnalysisRequest) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return _analysis_response(item)
+
+
+@router.post("/song-search")
+def song_search(payload: AiSongSearchRequest) -> dict[str, Any]:
+    with AiSongSearchService() as service:
+        return service.search(payload.query, limit=5)

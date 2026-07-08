@@ -20,7 +20,16 @@ CORE_STYLES = [
 
 
 UNCLASSIFIED_STYLE_LABELS = {"其他", "其他榜", "未分类", "未识别", "unknown", "misc", "other"}
-GENERIC_HOT_CHART_PATTERNS = (r"热歌榜", r"新歌榜", r"飙升榜", r"综合榜", r"top\s*500", r"热门歌曲", r"评论热度榜", r"平台总榜")
+GENERIC_HOT_CHART_PATTERNS = (
+    r"热歌榜",
+    r"新歌榜",
+    r"飙升榜",
+    r"综合榜",
+    r"top\s*500",
+    r"热门歌曲",
+    r"评论热度榜",
+    r"平台总榜",
+)
 
 
 def normalize_style_name(value: str | None) -> str | None:
@@ -36,7 +45,7 @@ def normalize_style_name(value: str | None) -> str | None:
         return "说唱 / Hip-Hop"
     if re.search(r"电子|电音|dance|edm|electro|dj", text, flags=re.I):
         return "电子 / Dance"
-    if re.search(r"国风|古风|中国风|古风国风|国乐", text):
+    if re.search(r"国风|古风|中国风|戏腔|国乐", text):
         return "国风 / 古风"
     if re.search(r"ost|影视|原声|影视原声|影视音乐|电影|剧集", text, flags=re.I):
         return "OST / 影视音乐"
@@ -56,14 +65,49 @@ def normalize_style_name(value: str | None) -> str | None:
         return "流行"
     if any(re.search(pattern, text, flags=re.I) for pattern in GENERIC_HOT_CHART_PATTERNS):
         return None
-    if compact in {"pop", "cpop", "mandopop", "mandarinpop", "流行", "流行pop", "pop流行", "流行榜"} or re.search(r"华语流行|中文流行|国语流行|mandarin\s*pop|c-?pop", text, flags=re.I):
+    if compact in {"pop", "cpop", "mandopop", "mandarinpop", "流行", "流行pop", "pop流行", "流行榜"} or re.search(
+        r"华语流行|中文流行|国语流行|mandarin\s*pop|c-?pop",
+        text,
+        flags=re.I,
+    ):
         return "流行"
 
     return None
 
 
+def normalize_style_intent(query: str | None) -> list[str]:
+    text = (query or "").strip()
+    if not text:
+        return []
+
+    candidates = [
+        text,
+        *re.split(r"[\s,，。.!！?？、/]+", text),
+    ]
+    if re.search(r"抒情|治愈|温柔|安静|慢歌|情歌|学习|emo|伤感|难过|失恋", text, flags=re.I):
+        candidates.append("流行")
+    if re.search(r"燃|热血|炸|乐队", text, flags=re.I):
+        candidates.append("摇滚")
+    if re.search(r"夏天|蹦迪|律动", text, flags=re.I):
+        candidates.append("电子 / Dance")
+
+    styles: list[str] = []
+    for candidate in candidates:
+        style = normalize_style_name(candidate)
+        if style and style in CORE_STYLES and style not in styles:
+            styles.append(style)
+
+    if not styles and re.search(r"推荐|最近|很火|热门|想听|歌曲|歌", text):
+        styles.append("流行")
+    return styles
+
+
 def ensure_core_styles_visible(style_stats: list[dict[str, Any]], limit: int = 10) -> list[dict[str, Any]]:
-    items = [item for item in style_stats if item.get("style") in CORE_STYLES and int(item.get("count") or item.get("song_count") or 0) > 0]
+    items = [
+        item
+        for item in style_stats
+        if item.get("style") in CORE_STYLES and int(item.get("count") or item.get("song_count") or 0) > 0
+    ]
     items.sort(key=lambda item: int(item.get("count") or item.get("song_count") or 0), reverse=True)
 
     pop_index = next(

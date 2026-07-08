@@ -55,6 +55,7 @@ def main() -> None:
         "job_date": target_date.isoformat(),
         "crawl_result": None,
         "heat_result": None,
+        "completion_result": None,
         "ai_result": None,
         "started_at": started_at.isoformat(timespec="seconds"),
         "finished_at": None,
@@ -72,6 +73,9 @@ def main() -> None:
             logger.info("Computing heat score")
             with HeatScoreService() as service:
                 result["heat_result"] = service.compute_daily(score_date=target_date)
+            if result["heat_result"].get("status") == "success":
+                logger.info("Completing missing platforms for analysis songs")
+                result["completion_result"] = CrawlerService().complete_analysis_songs(score_date=target_date)
 
         if args.with_ai:
             logger.info("Generating AI analysis")

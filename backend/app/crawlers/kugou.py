@@ -44,6 +44,54 @@ class KugouMusicCrawler(BaseMusicCrawler):
         ArtistChartConfig("kugou_artist_top", "歌手榜", "artist_hot", "singer_list"),
     )
 
+    def search_song(self, keyword: str) -> ChartSongItem | None:
+        data = self.request_json(
+            "GET",
+            "https://songsearch.kugou.com/song_search_v2",
+            params={
+                "keyword": keyword,
+                "page": 1,
+                "pagesize": 20,
+                "userid": -1,
+                "clientver": 2000,
+                "platform": "WebFilter",
+                "tag": "em",
+                "filter": 2,
+                "iscorrection": 1,
+                "privilege_filter": 0,
+            },
+            headers={"Referer": "https://www.kugou.com/"},
+        )
+        songs = ((data.get("data") or {}).get("lists") or [])
+        candidates: list[ChartSongItem] = []
+        for raw in songs:
+            song_hash = str(raw.get("FileHash") or raw.get("Hash") or raw.get("hash") or "")
+            if not song_hash:
+                continue
+            artist_name, song_name = split_artist_title(
+                str(raw.get("FileName") or raw.get("SongName") or raw.get("songname") or ""),
+                str(raw.get("SingerName") or raw.get("singername") or ""),
+            )
+            candidates.append(
+                build_chart_song_item(
+                    platform=self.platform_name,
+                    chart=ChartConfig("kugou_search", "搜索结果", "explore", "search"),
+                    rank=1,
+                    artist_names=split_artist_names(artist_name),
+                    raw_song_name=song_name,
+                    raw_artist_name=artist_name,
+                    platform_song_id=song_hash,
+                    chart_date=date.today(),
+                    raw_metadata=raw,
+                    album_name=raw.get("AlbumName") or raw.get("album_name"),
+                    album_id=str(raw.get("AlbumID") or raw.get("album_id") or raw.get("AlbumAudioID") or "") or None,
+                    song_hash=song_hash,
+                    song_url=f"https://www.kugou.com/song/#hash={song_hash}",
+                    cover_url=_normalize_kugou_cover(raw.get("Image") or raw.get("imgurl")),
+                )
+            )
+        return _best_search_candidate(keyword, candidates)
+
     def fetch_chart(
         self, chart: ChartConfig, chart_date: date, top_n: int
     ) -> list[ChartSongItem]:
@@ -325,3 +373,27 @@ def _extract_kugou_comment_count(data: dict[str, Any]) -> int | None:
         if parsed is not None:
             return parsed
     return None
+
+
+def _best_search_candidate(keyword: str, candidates: list[ChartSongItem]) -> ChartSongItem | None:
+    if not candidates:
+        return None
+    query = _normalize_search_text(keyword)
+    return max(candidates, key=lambda item: _search_score(query, item))
+
+
+def _search_score(query: str, item: ChartSongItem) -> int:
+    song = _normalize_search_text(item.song_name)
+    artist = _normalize_search_text(item.artist_name)
+    score = 0
+    if song and song in query:
+        score += 100
+    if artist and artist in query:
+        score += 100
+    if song and query in song:
+        score += 50
+    return score
+
+
+def _normalize_search_text(value: str | None) -> str:
+    return "".join(str(value or "").lower().split())

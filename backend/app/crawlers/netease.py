@@ -44,6 +44,40 @@ class NeteaseMusicCrawler(BaseMusicCrawler):
         ArtistChartConfig("netease_artist_top", "歌手榜", "artist_hot", "top"),
     )
 
+    def search_song(self, keyword: str) -> ChartSongItem | None:
+        data = self.request_json(
+            "GET",
+            "https://music.163.com/api/search/get/web",
+            params={"s": keyword, "type": 1, "offset": 0, "limit": 20},
+            headers={"Referer": "https://music.163.com/"},
+        )
+        songs = ((data.get("result") or {}).get("songs") or [])
+        candidates: list[ChartSongItem] = []
+        for raw in songs:
+            song_id = str(raw.get("id") or "")
+            if not song_id:
+                continue
+            artists = raw.get("artists") or raw.get("ar") or []
+            album = raw.get("album") or raw.get("al") or {}
+            candidates.append(
+                build_chart_song_item(
+                    platform=self.platform_name,
+                    chart=ChartConfig("netease_search", "搜索结果", "explore", "search"),
+                    rank=1,
+                    artist_names=extract_artist_names(artists),
+                    raw_song_name=str(raw.get("name") or ""),
+                    raw_artist_name=join_artists(artists),
+                    platform_song_id=song_id,
+                    chart_date=date.today(),
+                    raw_metadata=raw,
+                    album_name=_album_name(album),
+                    album_id=str(album.get("id") or "") or None,
+                    cover_url=_album_cover(album),
+                    song_url=f"https://music.163.com/song?id={song_id}",
+                )
+            )
+        return _best_search_candidate(keyword, candidates)
+
     def fetch_chart(
         self, chart: ChartConfig, chart_date: date, top_n: int
     ) -> list[ChartSongItem]:
@@ -183,3 +217,27 @@ def _extract_artist_items(data: dict[str, Any]) -> list[dict[str, Any]]:
 def _artist_raw_avatar(raw: dict[str, Any]) -> str | None:
     value = raw.get("img1v1Url") or raw.get("picUrl") or raw.get("avatar") or raw.get("cover")
     return str(value) if value else None
+
+
+def _best_search_candidate(keyword: str, candidates: list[ChartSongItem]) -> ChartSongItem | None:
+    if not candidates:
+        return None
+    query = _normalize_search_text(keyword)
+    return max(candidates, key=lambda item: _search_score(query, item))
+
+
+def _search_score(query: str, item: ChartSongItem) -> int:
+    song = _normalize_search_text(item.song_name)
+    artist = _normalize_search_text(item.artist_name)
+    score = 0
+    if song and song in query:
+        score += 100
+    if artist and artist in query:
+        score += 100
+    if song and query in song:
+        score += 50
+    return score
+
+
+def _normalize_search_text(value: str | None) -> str:
+    return "".join(str(value or "").lower().split())

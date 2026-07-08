@@ -173,28 +173,6 @@ h3 {
   font-size: 15px;
 }
 
-.search {
-  position: relative;
-  width: min(420px, 44vw);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  background: rgba(255, 255, 255, 0.86);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 10px 28px rgba(23, 32, 38, 0.06);
-}
-
-.search input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-}
-
-.search button,
 .ghost-button,
 .primary-button {
   height: 34px;
@@ -214,36 +192,6 @@ h3 {
 
 .ghost-button {
   padding: 0 10px;
-}
-
-.search-popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  right: 0;
-  display: none;
-  max-height: 320px;
-  overflow: auto;
-  padding: 8px;
-  border: 1px solid var(--line);
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: var(--shadow);
-  z-index: 30;
-}
-
-.search-popover.active {
-  display: grid;
-  gap: 6px;
-}
-
-.search-row {
-  width: 100%;
-  padding: 10px;
-  text-align: left;
-  border: 0;
-  background: #f5f8f7;
-  border-radius: 8px;
 }
 
 .view {
@@ -1098,10 +1046,6 @@ h3 {
     flex-direction: column;
   }
 
-  .search {
-    width: 100%;
-  }
-
   .metric-grid,
   .style-grid,
   .artist-strip {
@@ -1291,80 +1235,6 @@ body {
 .eyebrow {
   color: var(--accent);
   letter-spacing: 0;
-}
-
-.top-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.search {
-  width: min(390px, 42vw);
-  height: 44px;
-  padding: 0 8px 0 16px;
-  background: #ffffff;
-  border-color: #dce8e4;
-  border-radius: 10px;
-  box-shadow: var(--shadow-soft);
-}
-
-.search button,
-.icon-button {
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
-  border: 0;
-  color: #42526a;
-  background: #f5faf8;
-  border-radius: 10px;
-}
-
-.icon-button {
-  display: grid;
-  place-items: center;
-  font-weight: 900;
-}
-
-.search-popover {
-  top: calc(100% + 10px);
-  padding: 10px;
-  border-radius: 12px;
-  border-color: #dfeae6;
-  box-shadow: 0 20px 50px rgba(22, 49, 57, 0.14);
-}
-
-.search-group {
-  display: grid;
-  gap: 6px;
-}
-
-.search-group + .search-group {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-
-.search-group > strong {
-  color: var(--accent);
-  font-size: 12px;
-}
-
-.search-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: #f7fbfa;
-  border-radius: 10px;
-}
-
-.search-row span {
-  display: grid;
-  gap: 2px;
-}
-
-.search-row small {
-  color: var(--muted);
 }
 
 .panel,
@@ -1624,11 +1494,6 @@ body {
   font-size: 15px;
 }
 
-.platform-tag {
-  justify-self: end;
-  white-space: nowrap;
-}
-
 .artist-rank-arrow {
   justify-self: end;
   color: var(--accent);
@@ -1650,15 +1515,18 @@ body {
 
 .mini-rank-card {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
-  gap: 9px;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 12px;
   align-items: center;
   padding: 9px;
 }
 
 .mini-rank-card .tag {
-  grid-column: 2;
+  grid-column: 3;
+  justify-self: end;
+  align-self: center;
   width: fit-content;
+  white-space: nowrap;
 }
 
 .tag {
@@ -1734,67 +1602,16 @@ body {
   font-weight: 900;
 }
 
-.style-overview {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(360px, 0.9fr);
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.style-intro-card {
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  gap: 24px;
-  align-items: center;
-}
-
-.style-illustration {
-  min-height: 170px;
-  display: grid;
-  place-items: center;
-  color: #00856f;
-  background: linear-gradient(135deg, #d9f5ef, #f4fbf8);
-  border-radius: 14px;
-}
-
-.style-illustration span {
-  width: 104px;
-  height: 104px;
-  display: grid;
-  place-items: center;
-  background: #ffffff;
-  border-radius: 50%;
-  box-shadow: var(--shadow);
-  font-size: 58px;
-}
-
-.metric-row,
 .metric-grid {
   display: grid;
   gap: 14px;
 }
 
-.metric-row {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-top: 18px;
-}
-
-.metric-row span,
 .metric-card {
   padding: 15px;
   background: #f4faf8;
   border: 1px solid #e3f0ec;
   border-radius: 12px;
-}
-
-.metric-row b,
-.metric-row small {
-  display: block;
-}
-
-.metric-row b {
-  color: var(--accent);
-  font-size: 22px;
 }
 
 .metric-grid {
@@ -2240,11 +2057,6 @@ body {
   font-style: normal;
 }
 
-.representative-song-platforms {
-  display: inline-flex;
-  gap: 5px;
-}
-
 .representative-song-arrow {
   color: var(--accent);
   font-size: 24px;
@@ -2281,6 +2093,142 @@ body {
 
 .explorer-search-panel {
   margin-bottom: 16px;
+}
+
+.ai-song-search {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.2fr);
+  gap: 18px;
+  align-items: end;
+}
+
+.ai-song-search h3 {
+  margin: 4px 0 6px;
+  font-size: 18px;
+}
+
+.ai-song-search-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: 12px;
+}
+
+.ai-song-search input {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.ai-song-results {
+  margin-top: 16px;
+}
+
+.ai-song-loading,
+.ai-song-empty {
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.ai-song-loading span {
+  width: 18px;
+  height: 18px;
+  border: 3px solid #d9eee9;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.ai-song-result-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+
+.ai-song-result-head b {
+  color: var(--accent);
+}
+
+.ai-song-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-song-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 10px;
+  min-height: 132px;
+  padding: 12px;
+  border: 1px solid #dcebe7;
+  border-radius: 12px;
+  background: #fbfefd;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(20, 70, 72, 0.05);
+}
+
+.ai-song-card:hover {
+  border-color: #9dd8cf;
+  transform: translateY(-1px);
+}
+
+.ai-song-card-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding-right: 28px;
+}
+
+.ai-song-card-copy b,
+.ai-song-card-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-song-card-copy b {
+  color: #162235;
+}
+
+.ai-song-card-copy small {
+  color: var(--muted);
+}
+
+.ai-song-score {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--muted);
+}
+
+.ai-song-score b {
+  color: var(--accent);
+  font-size: 22px;
+}
+
+.ai-song-rank {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: #7c8b9b;
+  font-weight: 800;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .explorer-search {
@@ -2400,7 +2348,6 @@ body {
 @media (max-width: 1320px) {
   .dashboard-secondary-section,
   .dashboard-middle,
-  .style-overview,
   .detail-hero {
     grid-template-columns: 1fr;
   }
@@ -2411,16 +2358,13 @@ body {
   .pair-grid,
   .metric-grid,
   .cross-bottom,
-  .song-card-strip {
+  .song-card-strip,
+  .ai-song-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .representative-song-row {
     grid-template-columns: 32px 44px minmax(0, 1fr) 16px;
-  }
-
-  .representative-song-platforms {
-    display: none;
   }
 
   .artist-platform-distribution .pie-chart-wrap {
@@ -2463,26 +2407,22 @@ body {
     padding: 16px;
   }
 
-  .topbar,
-  .top-actions {
+  .topbar {
     display: grid;
     align-items: stretch;
-  }
-
-  .search {
-    width: 100%;
   }
 
   .dashboard-rankings,
   .mini-rankings-grid,
   .mini-stack,
   .style-grid,
-  .style-overview,
   .pair-grid,
   .metric-grid,
   .cross-bottom,
   .song-card-strip,
-  .metric-row {
+  .ai-song-search,
+  .ai-song-search-controls,
+  .ai-song-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2499,7 +2439,6 @@ body {
     grid-row: span 1;
   }
 
-  .style-intro-card,
   .style-card,
   .detail-hero {
     grid-template-columns: 1fr;
@@ -2523,11 +2462,5 @@ body {
   .artist-rank-stats,
   .artist-rank-arrow {
     display: none;
-  }
-
-  .platform-tag {
-    grid-column: 3 / 5;
-    justify-self: start;
-    max-width: 100%;
   }
 }

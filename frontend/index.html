@@ -51,15 +51,6 @@
           <h1 id="pageTitle">首页数据大盘</h1>
           <p id="pageSubtitle">系统基于三大音乐平台公开榜单热度分析</p>
         </div>
-
-        <div class="top-actions">
-          <form class="search" id="searchForm">
-            <input id="searchInput" type="search" placeholder="搜索歌曲、歌手或风格" autocomplete="off" />
-            <button type="submit" title="搜索" aria-label="搜索">⌕</button>
-            <div class="search-popover" id="searchResults"></div>
-          </form>
-          <button class="icon-button" type="button" title="通知" aria-label="通知">!</button>
-        </div>
       </header>
 
       <section class="view active" id="dashboardView">
@@ -136,10 +127,6 @@
           </div>
           <div class="treemap" id="styleTreemap"></div>
         </section>
-
-        <section class="soft-note" id="qualityNote">
-          数据来源：三大音乐平台公开榜单及真实采集到的用户评论数据。评论数仅在真实存在时展示，不参与跨平台综合热度主排序。
-        </section>
       </section>
 
       <section class="view" id="listView">
@@ -163,7 +150,6 @@
           </div>
           <button class="ghost-button hidden" type="button" id="backToStyles" title="返回风格榜单中心">返回</button>
         </div>
-        <div id="styleOverview"></div>
         <div class="style-grid" id="styleCards"></div>
         <div class="style-detail hidden" id="styleDetail"></div>
       </section>
@@ -186,6 +172,20 @@
             <h2>歌曲探索 / 实时歌曲分析</h2>
           </div>
         </div>
+        <article class="panel explorer-search-panel">
+          <form class="ai-song-search" id="aiSongSearchForm">
+            <div>
+              <p class="eyebrow">AI SONG SEARCH</p>
+              <h3>AI 歌曲检索</h3>
+              <p class="muted">描述想听的歌曲，系统会从数据库返回近期热度最高的匹配歌曲。</p>
+            </div>
+            <div class="ai-song-search-controls">
+              <input id="aiSongQuery" type="search" placeholder="例如：我想听抒情歌、推荐几首说唱、最近很火的emo" autocomplete="off" />
+              <button class="primary-button" type="submit">AI 推荐</button>
+            </div>
+          </form>
+          <div class="ai-song-results" id="aiSongSearchResults"></div>
+        </article>
         <article class="panel explorer-search-panel">
           <form class="explorer-search" id="exploreSearchForm">
             <input id="exploreKeyword" type="search" placeholder="搜索歌曲，如：晴天、晴天 周杰伦、有何不可" autocomplete="off" />

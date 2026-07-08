@@ -16,6 +16,9 @@ class PipelineService:
         with HeatScoreService() as service:
             heat = service.compute_daily(score_date=target_date)
         result["heat"] = heat
+        if heat.get("status") == "success":
+            score_date = date.fromisoformat(str(heat["score_date"]))
+            result["completion"] = CrawlerService().complete_analysis_songs(score_date=score_date)
         if ai and heat.get("status") == "success":
             with AiAnalysisService() as service:
                 result["ai_analysis"] = service.generate_daily_summary(

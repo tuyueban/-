@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import math
 import json
 import logging
-import re
-import unicodedata
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import Integer, and_, desc, func, or_, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
@@ -27,6 +24,7 @@ from app.models import (
     SongMetric,
 )
 from app.crawlers.utils import canonical_artist_name, canonical_artist_key
+from app.services.cache import TtlCache
 from app.services.song_matcher import (
     artist_display_names,
     normalize_artists,
@@ -38,11 +36,16 @@ from app.services.style_service import ensure_core_styles_visible, normalize_sty
 
 
 logger = logging.getLogger(__name__)
+HOME_DASHBOARD_CACHE: TtlCache[dict[str, Any]] = TtlCache(ttl_seconds=180, max_size=24)
 
 class AnalyticsService:
     def __init__(self, db: Session | None = None) -> None:
         self.db = db or SessionLocal()
         self._owns_session = db is None
+        self._cover_cache: dict[int, str | None] = {}
+        self._artist_avatar_cache: dict[str, str | None] = {}
+        self._artist_names_cache: dict[int, list[str]] = {}
+        self._primary_artist_cache: dict[int, str | None] = {}
 
     def rising_result(self, score_date: date | None = None, limit: int = 50) -> dict[str, Any]:
         current_date = score_date or self.latest_score_date()
@@ -274,6 +277,52 @@ class AnalyticsService:
             "latest_report": latest_report,
         }
 
+    def home_dashboard(self, target_date: date | None = None, limit: int = 50) -> dict[str, Any]:
+        score_date = target_date or self.latest_score_date()
+        chart_date = target_date or self.latest_chart_date()
+        cache_key = (
+            score_date.isoformat() if score_date else None,
+            chart_date.isoformat() if chart_date else None,
+            limit,
+        )
+        cached = HOME_DASHBOARD_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+        dashboard = self.dashboard(target_date=target_date)
+        daily = self.daily_hot(score_date=score_date, limit=limit) if score_date else []
+        weekly = self.weekly_hot(end_date=score_date, limit=limit) if score_date else []
+        artists = self.artist_rank(score_date=score_date, limit=limit) if score_date else []
+        rising = self.rising_result(score_date=score_date, limit=limit)
+        new_songs = self.new_songs(chart_date=chart_date, limit=limit) if chart_date else []
+        interaction_heat = self.interaction_heat(metric_date=chart_date, limit=limit) if chart_date else []
+        style_buckets = self.get_style_distribution(chart_date=chart_date, days=30, limit=limit) if chart_date else {
+            "chart_date": None,
+            "days": 30,
+            "total_count": 0,
+            "total_canonical_songs": 0,
+            "classified_song_count": 0,
+            "unclassified_song_count": 0,
+            "items": [],
+            "debug": [],
+            "unclassified_style_diagnostics": [],
+        }
+        payload = {
+            "dashboard": dashboard,
+            "daily": {"items": daily, "count": len(daily)},
+            "weekly": {"items": weekly, "count": len(weekly), "message": _weekly_message(weekly)},
+            "artists": {"items": artists, "count": len(artists)},
+            "rising": rising,
+            "newSongs": {"items": new_songs, "count": len(new_songs)},
+            "interactionHeat": {"items": interaction_heat, "count": len(interaction_heat)},
+            "styleBuckets": {
+                **style_buckets,
+                "count": len(style_buckets.get("items") or []),
+                "message": "基于统一风格标准化统计，兼容风格字段与榜单名称推断",
+            },
+        }
+        return HOME_DASHBOARD_CACHE.set(cache_key, payload)
+
     def daily_hot(self, score_date: date | None = None, limit: int = 50) -> list[dict[str, Any]]:
         current_date = score_date or self.latest_score_date()
         if current_date is None:
@@ -284,6 +333,7 @@ class AnalyticsService:
             .where(HeatScoreDaily.score_date == current_date)
             .order_by(desc(HeatScoreDaily.heat_score))
         ).all()
+        self._prime_song_display_cache([song for _score, song in rows])
         items = _merge_song_items([self._heat_row(score, song) for score, song in rows])
         items.sort(key=lambda item: (item.get("adjustedHeat") or item.get("adjusted_heat") or 0), reverse=True)
         return _rerank(items)[:limit]
@@ -309,6 +359,8 @@ class AnalyticsService:
             .order_by(desc("avg_score"))
             .limit(limit * 3)
         ).all()
+        self._prime_song_cover_cache([row.song_id for row in rows])
+        self._prime_artist_avatar_cache({row.artist_name for row in rows if row.artist_name})
         items = [
             {
                 "rank": index,
@@ -328,8 +380,6 @@ class AnalyticsService:
                 "is_formal_weekly": int(row.available_days) >= 7,
                 "period_message": (
                     "正式周榜"
-                    if int(row.available_days) >= 7
-                    else f"当前仅累计 {int(row.available_days)} 天数据，暂展示近 {int(row.available_days)} 日累计榜；连续采集 7 天后生成正式周榜。"
                 ),
             }
             for index, row in enumerate(rows, start=1)
@@ -357,6 +407,7 @@ class AnalyticsService:
             .order_by(desc(HeatScoreDaily.rank_delta), desc(HeatScoreDaily.heat_score))
             .limit(limit * 3)
         ).all()
+        self._prime_song_display_cache([song for _score, song in rows])
         items = [self._heat_row(score, song) for score, song in rows]
         return _rerank(_merge_song_items(items))[:limit]
 
@@ -392,6 +443,7 @@ class AnalyticsService:
             )
             scored_rows.append((song, int(comment_count or 0), int(platform_count or 0), completeness_score, interaction_score))
         scored_rows.sort(key=lambda row: row[4], reverse=True)
+        self._prime_song_display_cache([song for song, *_rest in scored_rows[:limit]])
         items = [
             {
                 "rank": index,
@@ -1151,6 +1203,7 @@ class AnalyticsService:
 
         song_ids = set(matched.get("song_ids") or [song_id]) if matched else {song_id}
         metric_map = self._latest_comment_metric_map(song_ids)
+        platform_song_map = self._platform_song_snapshot_map(song_ids)
         platforms = []
         for platform in ("netease", "qq", "kugou"):
             platform_item = None
@@ -1158,9 +1211,15 @@ class AnalyticsService:
                 platform_item = matched
             comment_count = metric_map.get(platform)
             has_comment = comment_count is not None and comment_count > 0
+            platform_song = platform_song_map.get(platform)
             row = {
                 "platform": platform,
                 "platform_name": _platform_display_name(platform),
+                "has_platform_data": platform_song is not None or has_comment,
+                "platform_song_id": platform_song.platform_song_id if platform_song else None,
+                "platform_song_mid": platform_song.platform_song_mid if platform_song else None,
+                "song_url": platform_song.song_url if platform_song else None,
+                "cover_url": platform_song.cover_url if platform_song else None,
                 "chart_name": None,
                 "rank": None,
                 "rank_score": None,
@@ -1191,6 +1250,21 @@ class AnalyticsService:
             "chart_type": chart_type,
             "platforms": platforms,
         }
+
+    def _platform_song_snapshot_map(self, song_ids: set[int]) -> dict[str, PlatformSong]:
+        if not song_ids:
+            return {}
+        rows = self.db.execute(
+            select(PlatformSong)
+            .where(PlatformSong.song_id.in_(song_ids))
+            .order_by(PlatformSong.id)
+        ).scalars().all()
+        snapshots: dict[str, PlatformSong] = {}
+        for row in rows:
+            platform = _platform_code(row.platform)
+            if platform in {"netease", "qq", "kugou"} and platform not in snapshots:
+                snapshots[platform] = row
+        return snapshots
 
     def platform_exclusive_songs(self, chart_date: date | None = None) -> dict[str, Any]:
         current_date = chart_date or self.latest_chart_date()
@@ -1473,6 +1547,7 @@ class AnalyticsService:
             new_song_score = new_rank_score * 0.75 + platform_coverage_score * 0.20 + chart_type_score * 0.05
             scored.append((song_id, item, new_song_score, new_rank_score, platform_coverage_score))
         scored.sort(key=lambda row: row[2], reverse=True)
+        self._prime_song_display_cache([item["song"] for _song_id, item, *_rest in scored[:limit]])
 
         return [
             {
@@ -1530,6 +1605,66 @@ class AnalyticsService:
             **self._song_display_fields(song),
         }
 
+    def _prime_song_display_cache(self, songs: list[Song]) -> None:
+        song_ids = sorted({song.song_id for song in songs if song})
+        if not song_ids:
+            return
+
+        self._prime_song_cover_cache(song_ids)
+
+        missing_artist_names = [song_id for song_id in song_ids if song_id not in self._artist_names_cache]
+        if missing_artist_names:
+            for song_id in missing_artist_names:
+                self._artist_names_cache[song_id] = []
+                self._primary_artist_cache.setdefault(song_id, None)
+            artist_rows = self.db.execute(
+                select(SongArtist.song_id, Artist.artist_name)
+                .join(Artist, SongArtist.artist_id == Artist.artist_id)
+                .where(SongArtist.song_id.in_(missing_artist_names))
+                .order_by(SongArtist.song_id, SongArtist.sort_order)
+            ).all()
+            for row in artist_rows:
+                names = self._artist_names_cache.setdefault(row.song_id, [])
+                names.append(row.artist_name)
+                self._primary_artist_cache.setdefault(row.song_id, row.artist_name)
+                if self._primary_artist_cache[row.song_id] is None:
+                    self._primary_artist_cache[row.song_id] = row.artist_name
+
+        avatar_names = {
+            name
+            for song in songs
+            for name in (song.artist_name, self._primary_artist_cache.get(song.song_id))
+            if name
+        }
+        self._prime_artist_avatar_cache(avatar_names)
+
+    def _prime_song_cover_cache(self, song_ids: list[int]) -> None:
+        missing_covers = [song_id for song_id in song_ids if song_id not in self._cover_cache]
+        if missing_covers:
+            for song_id in missing_covers:
+                self._cover_cache[song_id] = None
+            cover_rows = self.db.execute(
+                select(PlatformSong.song_id, PlatformSong.cover_url)
+                .where(PlatformSong.song_id.in_(missing_covers), PlatformSong.cover_url.is_not(None))
+                .order_by(PlatformSong.song_id, PlatformSong.id)
+            ).all()
+            for row in cover_rows:
+                if not self._cover_cache.get(row.song_id):
+                    self._cover_cache[row.song_id] = row.cover_url
+
+    def _prime_artist_avatar_cache(self, artist_names: set[str]) -> None:
+        missing_names = sorted(name for name in artist_names if name and name not in self._artist_avatar_cache)
+        if not missing_names:
+            return
+        for name in missing_names:
+            self._artist_avatar_cache[name] = None
+        rows = self.db.execute(
+            select(Artist.artist_name, Artist.avatar_url)
+            .where(Artist.artist_name.in_(missing_names), Artist.avatar_url.is_not(None))
+        ).all()
+        for row in rows:
+            self._artist_avatar_cache[row.artist_name] = row.avatar_url
+
     def _song_display_fields(self, song: Song, avatar_artist_name: str | None = None) -> dict[str, Any]:
         primary_artist_name = self._primary_artist_name_for_song(song.song_id) or song.artist_name
         return {
@@ -1545,39 +1680,57 @@ class AnalyticsService:
         }
 
     def _cover_for_song(self, song_id: int) -> str | None:
-        return self.db.execute(
+        if song_id in self._cover_cache:
+            return self._cover_cache[song_id]
+        cover_url = self.db.execute(
             select(PlatformSong.cover_url)
             .where(PlatformSong.song_id == song_id, PlatformSong.cover_url.is_not(None))
             .order_by(PlatformSong.id)
             .limit(1)
         ).scalar_one_or_none()
+        self._cover_cache[song_id] = cover_url
+        return cover_url
 
     def _artist_avatar_for_name(self, artist_name: str | None) -> str | None:
         if not artist_name:
             return None
-        return self.db.execute(
+        if artist_name in self._artist_avatar_cache:
+            return self._artist_avatar_cache[artist_name]
+        avatar_url = self.db.execute(
             select(Artist.avatar_url)
             .where(Artist.artist_name == artist_name, Artist.avatar_url.is_not(None))
             .limit(1)
         ).scalar_one_or_none()
+        self._artist_avatar_cache[artist_name] = avatar_url
+        return avatar_url
 
     def _artist_names_for_song(self, song_id: int) -> list[str]:
+        if song_id in self._artist_names_cache:
+            return self._artist_names_cache[song_id]
         rows = self.db.execute(
             select(Artist.artist_name)
             .join(SongArtist, SongArtist.artist_id == Artist.artist_id)
             .where(SongArtist.song_id == song_id)
             .order_by(SongArtist.sort_order)
         ).all()
-        return [row.artist_name for row in rows]
+        names = [row.artist_name for row in rows]
+        self._artist_names_cache[song_id] = names
+        if song_id not in self._primary_artist_cache:
+            self._primary_artist_cache[song_id] = names[0] if names else None
+        return names
 
     def _primary_artist_name_for_song(self, song_id: int) -> str | None:
-        return self.db.execute(
+        if song_id in self._primary_artist_cache:
+            return self._primary_artist_cache[song_id]
+        artist_name = self.db.execute(
             select(Artist.artist_name)
             .join(SongArtist, SongArtist.artist_id == Artist.artist_id)
             .where(SongArtist.song_id == song_id)
             .order_by(SongArtist.sort_order)
             .limit(1)
         ).scalar_one_or_none()
+        self._primary_artist_cache[song_id] = artist_name
+        return artist_name
 
     @staticmethod
     def _report_row(row: AiHeatAnalysis, include_content: bool) -> dict[str, Any]:
@@ -1608,12 +1761,6 @@ def _song_identity_key_for_song(song: Song) -> str:
 
 def _song_identity_key(song_name: str | None, artist_name: str | None) -> str:
     return song_identity_key(song_name, artist_name)
-
-def _normalize_song_identity_text(value: str | None) -> str:
-    return normalize_song_title(value)
-
-def _dedupe_song_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return _merge_song_items(items)
 
 def _merge_song_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     groups: list[dict[str, Any]] = []
@@ -1827,16 +1974,11 @@ def _rerank(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         item["rank"] = index
     return items
 
-def _log_count_score(count: int, max_count: int) -> float:
-    if count <= 0 or max_count <= 0:
-        return 0
-    return round(math.log(1 + count) / math.log(1 + max_count) * 100, 2)
-
-def _log_fixed_score(value: Any, scale: int) -> float:
-    number = max(float(value or 0), 0)
-    if number <= 0:
-        return 0
-    return round(min(math.log10(number + 1) / scale * 100, 100), 2)
+def _weekly_message(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "暂无周榜数据"
+    available_days = max(int(item.get("available_days") or 0) for item in items)
+    return "正式周榜" if available_days >= 7 else "周榜预览"
 
 def _nullable_float(value: Any) -> float | None:
     if value is None:
@@ -1907,13 +2049,6 @@ def _ordered_platforms(platforms: Any) -> list[str]:
     ordered = [platform for platform in preferred if platform in codes]
     ordered.extend(sorted(code for code in codes if code not in preferred))
     return ordered
-
-def _confidence_label(completeness: float) -> str:
-    if completeness >= 80:
-        return "高"
-    if completeness >= 50:
-        return "中"
-    return "低"
 
 def _heat_platform_count(score: HeatScoreDaily) -> int:
     return sum(

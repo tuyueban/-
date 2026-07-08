@@ -13,6 +13,11 @@ def dashboard(target_date: date | None = None) -> dict[str, object]:
     return analytics_call(lambda service: service.dashboard(target_date=target_date))
 
 
+@router.get("/home")
+def home(target_date: date | None = None, limit: int = Query(default=50, ge=1, le=500)) -> dict[str, object]:
+    return analytics_call(lambda service: service.home_dashboard(target_date=target_date, limit=limit))
+
+
 @router.get("/daily-hot")
 def daily_hot(score_date: date | None = None, limit: int = Query(default=50, ge=1, le=500)) -> dict[str, object]:
     items = analytics_call(lambda service: service.daily_hot(score_date=score_date, limit=limit))
@@ -38,8 +43,6 @@ def _weekly_message(items: list[dict[str, object]]) -> str:
     available_days = max(int(item.get("available_days") or 0) for item in items)
     if available_days >= 7:
         return "正式周榜"
-
-    return f"当前仅累计 {available_days} 天数据，暂展示近 {available_days} 日累计榜；连续采集 7 天后生成正式周榜。"
 
 
 @router.get("/rising")

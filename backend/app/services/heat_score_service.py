@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import date, datetime
 from typing import Any
 
@@ -8,7 +7,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
-from app.models import Chart, ChartSong, HeatScoreDaily, PlatformSong, Song, SongMetric
+from app.models import Chart, ChartSong, HeatScoreDaily, PlatformSong, Song
 
 
 MAIN_PLATFORM_KEYS = {
@@ -65,10 +64,7 @@ class HeatScoreService:
 
             results: list[dict[str, Any]] = []
             for song_id, item in per_song.items():
-                platform_scores = self._calculate_platform_scores(
-                    song_id,
-                    item["platform_ranks"],
-                )
+                platform_scores = self._calculate_platform_scores(item["platform_ranks"])
                 available_scores = [score for score in platform_scores.values() if score > 0]
                 platform_count = len(available_scores)
                 cross_platform_score = sum(platform_scores.values()) / 3
@@ -162,7 +158,6 @@ class HeatScoreService:
 
     def _calculate_platform_scores(
         self,
-        song_id: int,
         platform_ranks: dict[str, list[float]],
     ) -> dict[str, float]:
         scores = {platform: 0.0 for platform in MAIN_PLATFORM_KEYS}
@@ -294,5 +289,3 @@ def _dominant_platform(score: HeatScoreDaily) -> str | None:
     platform = max(values, key=values.get)
     return platform if values[platform] > 0 else None
 
-def to_json(data: Any) -> str:
-    return json.dumps(data, ensure_ascii=False, default=str)

@@ -15,9 +15,11 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.services.analytics_service import AnalyticsService
+from app.services.cache import TtlCache
 
 
 logger = logging.getLogger(__name__)
+DETAIL_AI_CACHE: TtlCache[dict[str, Any]] = TtlCache(ttl_seconds=60 * 60 * 6, max_size=512)
 
 
 TECHNICAL_PATTERNS = (
@@ -84,9 +86,14 @@ class DetailAiService:
             return None
 
         song = detail["song"]
+        latest_score = detail.get("latest_score") or {}
+        cache_key = ("song", song_id, latest_score.get("score_date"), strict_ai, settings.ai_model)
+        cached = DETAIL_AI_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
         evidence = {
             "song": song,
-            "latest_score": detail.get("latest_score") or {},
+            "latest_score": latest_score,
             "recent_metrics": detail.get("metrics", [])[:12],
             "recent_charts": detail.get("chart_records", [])[:12],
             "trend": detail.get("trend", [])[-14:],
@@ -111,12 +118,16 @@ class DetailAiService:
             strict_ai=strict_ai,
         )
         display_content = _strict_song_display_text(content) if strict_ai else _song_display_text(content, evidence)
-        return _response("song_heat_reason", display_content, mode, error, evidence, search_results)
+        return DETAIL_AI_CACHE.set(cache_key, _response("song_heat_reason", display_content, mode, error, evidence, search_results))
 
     def artist_analysis(self, artist_name: str, score_date: date | None = None, strict_ai: bool = False) -> dict[str, Any]:
         analytics = AnalyticsService(self.db)
         detail = analytics.artist_detail(artist_name=artist_name, score_date=score_date, limit=50)
         canonical_name = detail.get("canonical_artist_name") or artist_name
+        cache_key = ("artist", canonical_name, detail.get("score_date"), strict_ai, settings.ai_model)
+        cached = DETAIL_AI_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
         songs = detail.get("songs", [])[:20]
         trend = detail.get("trend", [])[-30:]
         song_names = unique_song_names(songs)
@@ -144,7 +155,7 @@ class DetailAiService:
             strict_ai=strict_ai,
         )
         display_content = _strict_artist_display_text(content) if strict_ai else _artist_display_text(content, evidence)
-        return _response("artist_profile_style", display_content, mode, error, evidence, [])
+        return DETAIL_AI_CACHE.set(cache_key, _response("artist_profile_style", display_content, mode, error, evidence, []))
 
     def _generate(
         self,

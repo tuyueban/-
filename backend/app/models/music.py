@@ -5,6 +5,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     UniqueConstraint,
@@ -87,6 +88,8 @@ class ChartSong(Base):
     __tablename__ = "ChartSong"
     __table_args__ = (
         UniqueConstraint("chart_id", "song_id", "chart_date", name="uq_chart_song_daily"),
+        Index("ix_chart_song_date_rank", "chart_date", "rank"),
+        Index("ix_chart_song_song_date", "song_id", "chart_date"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -105,6 +108,7 @@ class SongMetric(Base):
     __tablename__ = "SongMetric"
     __table_args__ = (
         UniqueConstraint("song_id", "platform", "metric_date", name="uq_song_metric_daily"),
+        Index("ix_song_metric_date_song", "metric_date", "song_id"),
     )
 
     metric_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -127,6 +131,8 @@ class HeatScoreDaily(Base):
     __tablename__ = "HeatScoreDaily"
     __table_args__ = (
         UniqueConstraint("song_id", "score_date", name="uq_heat_score_daily"),
+        Index("ix_heat_score_date_score", "score_date", "heat_score"),
+        Index("ix_heat_score_date_delta", "score_date", "rank_delta"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -212,6 +218,7 @@ class ArtistChartItem(Base):
     __tablename__ = "ArtistChartItem"
     __table_args__ = (
         UniqueConstraint("chart_id", "artist_id", "chart_date", name="uq_artist_chart_item"),
+        Index("ix_artist_chart_item_date_artist", "chart_date", "artist_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

@@ -71,7 +71,7 @@ class SongRepository:
             raise
 
     def upsert_chart_song(self, item: ChartSongItem) -> ChartSong:
-        display_artist_name = item.display_artist_name or item.artist_name
+        display_artist_name = _song_display_artist_name(item)
         song = self._get_or_create_song(item.song_name, display_artist_name, item.album_name)
         self._link_song_artists(song, item)
         self._upsert_platform_song(song, item)
@@ -109,6 +109,23 @@ class SongRepository:
         self.db.add(chart_song)
         self.db.flush()
         return chart_song
+
+    def upsert_platform_song_snapshot(
+        self,
+        canonical_song: ChartSongItem,
+        platform_item: ChartSongItem,
+    ) -> PlatformSong:
+        display_artist_name = _song_display_artist_name(canonical_song)
+        song = self._get_or_create_song(
+            canonical_song.song_name,
+            display_artist_name,
+            canonical_song.album_name,
+        )
+        self._link_song_artists(song, canonical_song)
+        platform_item.song_name = canonical_song.song_name
+        platform_item.artist_name = display_artist_name
+        platform_item.display_artist_name = display_artist_name
+        return self._upsert_platform_song(song, platform_item)
 
     def upsert_artist_chart_item(self, item: ArtistChartDto) -> ArtistChartItem:
         artist = self._upsert_artist(item.artist_name, item.artist_avatar_url)
@@ -186,7 +203,7 @@ class SongRepository:
 
     def _get_or_create_song(self, song_name: str, artist_name: str, album_name: str | None) -> Song:
         cleaned_song = clean_song_name(song_name) or song_name.strip() or "未知歌曲"
-        cleaned_artist = clean_artist_name(artist_name) or artist_name.strip() or "未知歌手"
+        cleaned_artist = _fit_text(clean_artist_name(artist_name) or artist_name.strip() or "未知歌手", 150)
         song = self.db.execute(
             select(Song).where(Song.song_name == cleaned_song, Song.artist_name == cleaned_artist)
         ).scalar_one_or_none()
@@ -422,6 +439,22 @@ def _choose_artist_match(
             return artist
 
     return artists[0]
+
+
+def _song_display_artist_name(item: ChartSongItem) -> str:
+    for artist_name in [
+        item.display_artist_name,
+        item.primary_artist_name,
+        *(_artist_names_for_item(item)[:1]),
+        item.artist_name,
+    ]:
+        if artist_name and artist_name.strip():
+            return _fit_text(artist_name.strip(), 150)
+    return "未知歌手"
+
+
+def _fit_text(value: str, max_length: int) -> str:
+    return value[:max_length] if len(value) > max_length else value
 
 
 def _artist_names_for_item(item: ChartSongItem) -> list[str]:

@@ -49,6 +49,7 @@ const state = {
   explorer: {
     sessionId: "",
     result: null,
+    aiSearch: null,
   },
   ai: {
     song: null,
@@ -206,10 +207,6 @@ function getSongSourcePlatformNames(item) {
   }
 
   return [];
-}
-
-function renderPlatformBadges(platformNames) {
-  return platformBadges(platformNames);
 }
 
 function sourcePlatforms(item) {
@@ -413,16 +410,10 @@ function riseReason(item) {
   if ((item.rank_delta || 0) > 10) return "排名跃升";
   if ((item.comment_count || 0) > 10000) return "评论暴涨";
   if ((item.heat_score || 0) > 45) return "热度增长";
-  if (/new|新/i.test(item.chart_type || item.trend_label || "")) return "新歌上榜";
+  if (/new|新/i.test(item.chart_type || item.trend_label || "")) return "新增入榜";
   if (/ost|影视|剧/.test(`${item.song_name || ""}${item.album_name || ""}`)) return "OST带动";
   if ((item.rank_delta || 0) > 0) return "歌手热度带动";
   return item.trend_label || "平台推荐";
-}
-
-function interactionTag(item) {
-  if ((item.platform_count || 0) >= 3) return "多平台互动";
-  if ((item.comment_count || 0) > 50000) return "评论热度高";
-  return "互动上升";
 }
 
 function risingRow(item) {
@@ -465,13 +456,11 @@ function songTitleCell(item) {
 
 function rankingTable(items, limit = 5) {
   const rows = items.slice(0, limit).map((item, index) => {
-    const platforms = platformBadges(sourcePlatforms(item));
     return `
       <tr>
         <td><span class="rank-no">${item.rank || index + 1}</span></td>
         <td>${songTitleCell(item)}</td>
         <td><b>${formatNumber(heatValue(item))}</b></td>
-        <td><div class="platform-badges">${platforms}</div></td>
       </tr>
     `;
   }).join("");
@@ -483,10 +472,9 @@ function rankingTable(items, limit = 5) {
             <th>排名</th>
             <th>歌曲 / 歌手</th>
             <th>综合热度</th>
-            <th>来源平台</th>
           </tr>
         </thead>
-        <tbody>${rows || `<tr><td colspan="4">${emptyText("暂无榜单数据")}</td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="3">${emptyText("暂无榜单数据")}</td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -499,7 +487,7 @@ function miniRankingList(items, tagResolver, limit = 5) {
       <div class="mini-rank-card">
         <span class="rank-no">${item.rank || index + 1}</span>
         ${songTitleCell(item)}
-        <span class="tag">${escapeHtml(tag || "")}</span>
+        ${tag ? `<span class="tag">${escapeHtml(tag)}</span>` : ""}
       </div>
     `;
   }).join("") || emptyText("暂无榜单数据");
@@ -520,7 +508,6 @@ function renderArtistRankingItem(item, index) {
   const avatar = artistField(item, ["artist_avatar_url", "artist_avatar", "avatar", "cover_url"]);
   const songCount = artistField(item, ["chart_song_count", "song_count"]);
   const avgHeat = artistField(item, ["avg_heat_score", "avg_heat", "heat_score", "artist_heat_score", "total_score"]);
-  const strongestPlatform = artistField(item, ["strongest_platform_name", "dominant_platform_name", "strongest_platform", "dominant_platform"]);
   const representativeSong = artistField(item, ["representative_song", "representative_songs"]);
   const rankClass = rank <= 3 ? `top-${rank}` : "";
   const metaParts = [];
@@ -541,7 +528,6 @@ function renderArtistRankingItem(item, index) {
       <span class="artist-rank-stats heat">
         ${avgHeat ? `<small>平均热度</small><b>${formatNumber(avgHeat)}</b>` : ""}
       </span>
-      ${strongestPlatform ? `<span class="tag platform-tag">${escapeHtml(platformName(strongestPlatform))}</span>` : ""}
       <span class="artist-rank-arrow">→</span>
     </button>
   `;
@@ -561,8 +547,8 @@ function renderDashboard() {
   $("#weeklyHotList").innerHTML = rankingTable(state.weekly, 5);
   $("#artistRankList").innerHTML = renderArtistRankingList(state.artists);
   $("#risingList").innerHTML = miniRankingList(state.rising, riseReason, 5);
-  $("#newSongList").innerHTML = miniRankingList(state.newSongs, "新歌上榜", 5);
-  $("#interactionHeatList").innerHTML = miniRankingList(state.interactionHeat, interactionTag, 5);
+  $("#newSongList").innerHTML = miniRankingList(state.newSongs, "", 5);
+  $("#interactionHeatList").innerHTML = miniRankingList(state.interactionHeat, "", 5);
   renderTreemap();
 }
 
@@ -643,7 +629,7 @@ function songArtistCell(item) {
 function renderSongListTable(items, options = {}) {
   const includeReason = options.reason;
   const includeGrowth = options.growth;
-  const colSpan = 5 + (includeGrowth ? 1 : 0) + (includeReason ? 1 : 0);
+  const colSpan = 4 + (includeGrowth ? 1 : 0) + (includeReason ? 1 : 0);
   return `
     <table class="table list-table">
       <thead>
@@ -652,7 +638,6 @@ function renderSongListTable(items, options = {}) {
           <th>歌曲</th>
           <th>歌手</th>
           <th>综合热度</th>
-          <th>来源平台</th>
           ${includeGrowth ? "<th>增长</th>" : ""}
           ${includeReason ? "<th>原因标签</th>" : ""}
         </tr>
@@ -664,7 +649,6 @@ function renderSongListTable(items, options = {}) {
             <td>${songCell(item)}</td>
             <td>${songArtistCell(item)}</td>
             <td>${formatNumber(heatValue(item))}</td>
-            <td><div class="platform-badges">${platformBadges(sourcePlatforms(item))}</div></td>
             ${includeGrowth ? `<td><span class="growth">${item.rank_delta ? `+${item.rank_delta}` : "新增"}</span></td>` : ""}
             ${includeReason ? `<td><span class="tag">${escapeHtml(reasonText(item, includeReason))}</span></td>` : ""}
           </tr>
@@ -674,16 +658,14 @@ function renderSongListTable(items, options = {}) {
   `;
 }
 
-function reasonText(item, mode) {
-  if (mode === "interaction") return interactionTag(item);
-  if (mode === "new") return "新歌上榜";
+function reasonText(item) {
   return riseReason(item);
 }
 
 function renderArtistListTable(items) {
   return `
     <table class="table list-table">
-      <thead><tr><th>排名</th><th>歌手</th><th>歌手热度分</th><th>最佳平台排名</th><th>数据来源平台</th></tr></thead>
+      <thead><tr><th>排名</th><th>歌手</th><th>歌手热度分</th><th>最佳平台排名</th></tr></thead>
       <tbody>
         ${items.slice(0, 50).map((item, index) => `
           <tr>
@@ -691,9 +673,8 @@ function renderArtistListTable(items) {
             <td>${artistCell(item)}</td>
             <td>${formatNumber(item.artist_heat_score || item.total_score)}</td>
             <td>${item.best_artist_chart_rank || "--"}</td>
-            <td><div class="platform-badges">${platformBadges(item.source_platforms || [])}</div></td>
           </tr>
-        `).join("") || `<tr><td colspan="5">暂无歌手榜数据</td></tr>`}
+        `).join("") || `<tr><td colspan="4">暂无歌手榜数据</td></tr>`}
       </tbody>
     </table>
   `;
@@ -709,8 +690,6 @@ function openList(key) {
     $("#listContent").innerHTML = renderArtistListTable(config.items);
   } else if (config.type === "rising") {
     $("#listContent").innerHTML = renderSongListTable(config.items, { growth: true, reason: true });
-  } else if (config.type === "interaction") {
-    $("#listContent").innerHTML = renderSongListTable(config.items, { reason: "interaction" });
   } else {
     $("#listContent").innerHTML = renderSongListTable(config.items);
   }
@@ -719,42 +698,6 @@ function openList(key) {
 function renderStyleCenter() {
   const totalSongs = Number(state.styleMeta?.classifiedSongCount || state.styleMeta?.classified_song_count)
     || state.styleBuckets.reduce((sum, style) => sum + Number(style.songCount || style.songs?.length || 0), 0);
-  const topStyles = state.styleBuckets.slice(0, 3);
-  const insights = topStyles.length
-    ? topStyles.map((style, index) => `${index + 1}. ${style.name} 当前上榜 ${formatNumber(style.songCount || style.songs?.length || 0)} 首，${index === 0 ? "是本期最活跃风格。" : "保持稳定热度。"}`)
-    : ["等待更多风格榜单数据形成观察。"];
-  const overview = $("#styleOverview");
-  if (overview) {
-    overview.innerHTML = `
-      <section class="style-overview">
-        <article class="panel style-intro-card">
-          <div class="style-illustration">
-            <span>♪</span>
-          </div>
-          <div>
-            <p class="eyebrow">三大音乐平台公开榜单热度分析系统</p>
-            <h2>关于风格榜单中心</h2>
-            <p class="muted">聚合三大音乐平台公开榜单数据，仅统计已识别风格的上榜歌曲。</p>
-            <div class="metric-row">
-              <span><b>${formatNumber(state.styleBuckets.length)}</b><small>风格分类</small></span>
-              <span><b>${formatNumber(totalSongs)}</b><small>已识别歌曲数</small></span>
-              <span><b>每日</b><small>数据更新</small></span>
-            </div>
-          </div>
-        </article>
-        <article class="panel ai-card">
-          <div class="panel-head">
-            <h2>AI 风格观察</h2>
-            <span>本地规则生成</span>
-          </div>
-          <ul class="insight-list">
-            ${insights.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-            ${state.styleMeta?.unclassifiedSongCount ? `<li>${escapeHtml("部分歌曲暂未识别到明确风格标签，因此未纳入风格分布统计。")}</li>` : ""}
-          </ul>
-        </article>
-      </section>
-    `;
-  }
   $("#styleCards").innerHTML = state.styleBuckets.map((style) => {
     const songs = style.songs.slice(0, 3);
     const firstCover = songs.find((song) => song.cover_url)?.cover_url;
@@ -825,10 +768,10 @@ function switchView(view) {
   document.querySelectorAll(".view").forEach((node) => node.classList.remove("active"));
   document.querySelectorAll(".nav-item").forEach((node) => node.classList.toggle("active", node.dataset.view === view));
   const metas = {
-    dashboard: ["首页数据大盘", "三大音乐平台公开榜单热度分析系统", "系统基于三大音乐平台公开榜单热度分析"],
+    dashboard: ["三大音乐平台歌曲热度分析系统"],
     list: ["完整榜单", "TOP50", "查看完整榜单数据"],
     styles: ["风格榜单中心", "STYLE CENTER", "从音乐风格维度观察歌曲流行趋势"],
-    explore: ["歌曲探索 / 实时歌曲分析", "SONG EXPLORER", "实时查询三大平台，分析任意歌曲的当前热度"],
+    explore: ["歌曲探索 ", "SONG EXPLORER", "实时查询三大平台，分析任意歌曲的当前热度"],
     crossPlatform: ["跨平台热度重合分析", "CROSS PLATFORM", "分析三大平台公开榜单的重合度与覆盖情况"],
     song: ["歌曲详情分析页", "歌曲详情", "单曲综合热度、平台表现与趋势分析"],
     artist: ["歌手详情分析页", "歌手详情", "歌手跨平台表现、代表歌曲与趋势分析"],
@@ -1242,6 +1185,63 @@ function renderSongExplorer(content = "") {
   if (node) node.innerHTML = content || explorerInitialHtml();
 }
 
+function aiSongSearchLoadingHtml() {
+  return `
+    <div class="ai-song-loading">
+      <span></span>
+      <b>AI 正在理解你的描述并检索歌曲...</b>
+    </div>
+  `;
+}
+
+function renderAiSongSearchResults(data) {
+  const node = $("#aiSongSearchResults");
+  if (!node) return;
+  const songs = Array.isArray(data?.songs) ? data.songs : [];
+  if (!songs.length) {
+    node.innerHTML = `<p class="ai-song-empty">未找到符合条件的歌曲，请尝试其他描述。</p>`;
+    return;
+  }
+  node.innerHTML = `
+    <div class="ai-song-result-head">
+      <span>识别意图：<b>${escapeHtml(data.intent || "--")}</b></span>
+      <small>按综合热度降序推荐 ${songs.length} 首</small>
+    </div>
+    <div class="ai-song-grid">
+      ${songs.map((song) => {
+        const chartText = song.chart_name || (Array.isArray(song.charts) && song.charts[0]?.chart_name) || "";
+        return `
+          <button class="ai-song-card" type="button" data-song-id="${song.song_id || ""}">
+            ${thumbHtml(song.cover_url, song.song_name, "item-cover")}
+            <span class="ai-song-card-copy">
+              <b>${escapeHtml(song.song_name || "--")}</b>
+              <small>${escapeHtml(song.artist_name || "--")}</small>
+              <small>风格：${escapeHtml(song.style || "--")}</small>
+              ${chartText ? `<small>榜单：${escapeHtml(chartText)}</small>` : ""}
+            </span>
+            <span class="ai-song-score">
+              <b>${formatNumber(song.heat_score)}</b>
+              <small>综合热度</small>
+            </span>
+            <span class="ai-song-rank">#${formatNumber(song.rank || 0)}</span>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+async function searchAiSongs(query) {
+  const node = $("#aiSongSearchResults");
+  if (node) node.innerHTML = aiSongSearchLoadingHtml();
+  const data = await api("/api/ai/song-search", {
+    method: "POST",
+    body: JSON.stringify({ query }),
+  });
+  state.explorer.aiSearch = data;
+  renderAiSongSearchResults(data);
+}
+
 function explorerPlatforms(result) {
   return Array.isArray(result?.platforms) ? result.platforms : [];
 }
@@ -1441,27 +1441,36 @@ function songPlatformPerformanceHtml(data) {
   const platforms = data?.platforms || [];
   return `
     <div class="platform-artist-grid">
-      ${platforms.map((item) => `
-        <div class="platform-artist-card ${platformCode(item.platform || item.platform_name)}">
-          <div class="platform-card-head">
-            ${platformBadge(item.platform || item.platform_name)}
-            <h3>${escapeHtml(item.platform_name)}</h3>
-            ${item.in_current_chart ? `<span class="tag">已上榜</span>` : ""}
+      ${platforms.map((item) => {
+        const hasPlatformData = Boolean(item.has_platform_data || item.hasPlatformData);
+        return `
+          <div class="platform-artist-card ${platformCode(item.platform || item.platform_name)}">
+            <div class="platform-card-head">
+              ${platformBadge(item.platform || item.platform_name)}
+              <h3>${escapeHtml(item.platform_name)}</h3>
+              ${item.in_current_chart ? `<span class="tag">已上榜</span>` : hasPlatformData ? `<span class="tag">已采集</span>` : ""}
+            </div>
+            <div class="metric-lines">
+              ${item.in_current_chart ? `
+                <span>榜单：${escapeHtml(item.chart_name || "--")}</span>
+                <span>排名：${item.rank ? formatNumber(item.rank) : "--"}</span>
+                <span>排名得分：${item.rank_score == null ? "--" : formatNumber(item.rank_score)}</span>
+                <span>平台热度：${item.heat_score == null ? "--" : formatNumber(item.heat_score)}</span>
+                <span>进入本次采集榜单：是</span>
+                ${Number(item.comment_count || 0) > 0 ? `<span>评论数：${formatNumber(item.comment_count)}</span>` : ""}
+              ` : hasPlatformData ? `
+                <span>未进入本次采集榜单</span>
+                <span>已补充平台数据：是</span>
+                ${Number(item.comment_count || 0) > 0 ? `<span>评论数：${formatNumber(item.comment_count)}</span>` : ""}
+                ${item.platform_song_id ? `<span>平台歌曲ID：${escapeHtml(item.platform_song_id)}</span>` : ""}
+              ` : `
+                <span>未进入本次采集榜单</span>
+                <span>暂无补充平台数据</span>
+              `}
+            </div>
           </div>
-          <div class="metric-lines">
-            ${item.in_current_chart ? `
-              <span>榜单：${escapeHtml(item.chart_name || "--")}</span>
-              <span>排名：${item.rank ? formatNumber(item.rank) : "--"}</span>
-              <span>排名得分：${item.rank_score == null ? "--" : formatNumber(item.rank_score)}</span>
-              <span>平台热度：${item.heat_score == null ? "--" : formatNumber(item.heat_score)}</span>
-              <span>进入本次采集榜单：是</span>
-              ${Number(item.comment_count || 0) > 0 ? `<span>评论数：${formatNumber(item.comment_count)}</span>` : ""}
-            ` : `
-              <span>未进入本次采集榜单</span>
-            `}
-          </div>
-        </div>
-      `).join("") || emptyText("暂无平台表现数据")}
+        `;
+      }).join("") || emptyText("暂无平台表现数据")}
     </div>
   `;
 }
@@ -1644,13 +1653,11 @@ function renderRepresentativeSongItem(song, index, options = {}) {
   const artistName = firstPresentValue(song, ["artist_name", "primary_artist_name", "artist"]);
   const coverUrl = firstPresentValue(song, ["cover_url", "album_cover", "image_url"]);
   const heat = firstPresentValue(song, ["heat_score", "avg_heat", "avg_heat_score", "score", "adjusted_heat", "total_score"]);
-  const platforms = sourcePlatforms(song);
   const rowAttrs = songId ? ` data-song-id="${escapeHtml(songId)}"` : "";
   const heatMeta = heat !== null ? `<span>热度：${formatNumber(heat)}</span>` : "";
   const artistMeta = options.showArtist && artistName
     ? `<button class="inline-artist-link" type="button" data-artist="${escapeHtml(artistName)}">${escapeHtml(artistName)}</button>`
     : "";
-  const platformMeta = platforms.length ? `<span>来源平台：${platforms.map((platform) => escapeHtml(platformName(platform))).join("、")}</span>` : "";
 
   return `
     <div class="representative-song-row"${rowAttrs} role="${songId ? "button" : "group"}" tabindex="${songId ? "0" : "-1"}">
@@ -1658,9 +1665,8 @@ function renderRepresentativeSongItem(song, index, options = {}) {
       ${thumbHtml(coverUrl, songName)}
       <span class="representative-song-copy">
         <b>${escapeHtml(songName)}</b>
-        <small>${[artistMeta, heatMeta, platformMeta].filter(Boolean).join("<i>|</i>")}</small>
+        <small>${[artistMeta, heatMeta].filter(Boolean).join("<i>|</i>")}</small>
       </span>
-      <span class="representative-song-platforms">${platformBadges(platforms)}</span>
       <span class="representative-song-arrow">›</span>
     </div>
   `;
@@ -1695,7 +1701,7 @@ function compareRepresentativeSongs(a, b) {
   if (platformDiff) return platformDiff;
   const rankDiff = Number(a?.best_rank || a?.rank || 999999) - Number(b?.best_rank || b?.rank || 999999);
   if (rankDiff) return rankDiff;
-  return sourcePlatforms(b).length - sourcePlatforms(a).length;
+  return 0;
 }
 
 function selectRepresentativeSongs(artist) {
@@ -1997,40 +2003,6 @@ async function openArtist(artistName) {
   loadArtistAnalysis(artistName, artistAiPayload);
 }
 
-async function search(keyword) {
-  const box = $("#searchResults");
-  const data = await api(`/api/songs/search?keyword=${encodeURIComponent(keyword)}&limit=8`);
-  const songs = data.items || [];
-  const artistMap = new Map();
-  [...songs, ...state.artists].forEach((item) => {
-    const name = item.primary_artist_name || item.artist_name;
-    if (name && name.includes(keyword)) artistMap.set(name, item);
-  });
-  const styles = state.styleBuckets.filter((style) => style.name.includes(keyword)).slice(0, 5);
-  const sections = [
-    songs.length ? `<div class="search-group"><strong>歌曲</strong>${songs.map((item) => `
-      <button class="search-row" type="button" data-song-id="${item.song_id}">
-        ${thumbHtml(item.cover_url, item.song_name)}
-        <span><b>${escapeHtml(item.song_name)}</b><small>${escapeHtml(item.artist_name)}</small></span>
-      </button>
-    `).join("")}</div>` : "",
-    artistMap.size ? `<div class="search-group"><strong>歌手</strong>${[...artistMap.entries()].slice(0, 5).map(([name, item]) => `
-      <button class="search-row" type="button" data-artist="${escapeHtml(name)}">
-        ${thumbHtml(item.artist_avatar_url, name, "item-cover avatar-thumb")}
-        <span><b>${escapeHtml(name)}</b><small>歌手详情</small></span>
-      </button>
-    `).join("")}</div>` : "",
-    styles.length ? `<div class="search-group"><strong>风格榜</strong>${styles.map((style) => `
-      <button class="search-row" type="button" data-style="${escapeHtml(style.name)}">
-        <span class="item-cover">${escapeHtml(style.name.slice(0, 1))}</span>
-        <span><b>${escapeHtml(style.name)}</b><small>${formatNumber(style.songCount || style.songs.length)} 首</small></span>
-      </button>
-    `).join("")}</div>` : "",
-  ].join("");
-  box.innerHTML = sections || `<div class="search-row">没有找到匹配结果</div>`;
-  box.classList.add("active");
-}
-
 async function loadDashboard() {
   const requestEntries = [
     ["dashboard", api("/api/charts/dashboard")],
@@ -2164,7 +2136,6 @@ function bindEvents() {
 
     const song = event.target.closest("[data-song-id]");
     if (song?.dataset.songId) {
-      $("#searchResults").classList.remove("active");
       openSong(song.dataset.songId).catch((error) => toast(error.message));
     }
 
@@ -2191,16 +2162,16 @@ function bindEvents() {
     state.expanded.style = false;
   });
 
-  $("#searchForm").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const keyword = $("#searchInput").value.trim();
-    if (keyword) search(keyword).catch((error) => toast(error.message));
-  });
-
   $("#exploreSearchForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const keyword = $("#exploreKeyword").value.trim();
     if (keyword) searchExploreSong(keyword).catch((error) => toast(error.message));
+  });
+
+  $("#aiSongSearchForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const query = $("#aiSongQuery").value.trim();
+    if (query) searchAiSongs(query).catch((error) => toast(error.message));
   });
 
   window.addEventListener("beforeunload", () => cleanupExploreSession(true));

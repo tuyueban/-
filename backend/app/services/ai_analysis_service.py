@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models import AiHeatAnalysis
-from app.services.heat_score_service import HeatScoreService, to_json
+from app.services.heat_score_service import HeatScoreService
 
 
 PROMPT_VERSION = "v1"
@@ -43,7 +43,7 @@ class AiAnalysisService:
         row = self._upsert_analysis(
             analysis_date=score_date,
             analysis_type="daily_heat_summary",
-            input_summary=to_json(summary),
+            input_summary=json.dumps(summary, ensure_ascii=False, default=str),
             content=content,
         )
         self.db.commit()

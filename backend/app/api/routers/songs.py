@@ -14,17 +14,17 @@ def search_songs(keyword: str = Query(min_length=1), limit: int = Query(default=
 
 @router.get("/{song_id}")
 def song_detail(song_id: int) -> dict[str, object]:
-    item = analytics_call(lambda service: service.song_detail(song_id))
-    return require_found(item, "Song not found")
+    return require_found(analytics_call(lambda service: service.song_detail(song_id)), "Song not found")
 
 
 @router.get("/{song_id}/platform-performance")
 def song_platform_performance(song_id: int, chart_type: str = "hot") -> dict[str, object]:
-    item = analytics_call(lambda service: service.song_platform_performance(song_id=song_id, chart_type=chart_type))
-    return require_found(item, "Song not found")
+    return require_found(
+        analytics_call(lambda service: service.song_platform_performance(song_id=song_id, chart_type=chart_type)),
+        "Song not found",
+    )
 
 
 @router.get("/{song_id}/analysis")
 def song_ai_analysis(song_id: int) -> dict[str, object]:
-    item = detail_ai_call(lambda service: service.song_analysis(song_id))
-    return require_found(item, "Song not found")
+    return require_found(detail_ai_call(lambda service: service.song_analysis(song_id)), "Song not found")
