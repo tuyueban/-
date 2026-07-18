@@ -2095,6 +2095,10 @@ body {
   margin-bottom: 16px;
 }
 
+.legacy-explorer-search-panel {
+  display: none;
+}
+
 .ai-song-search {
   display: grid;
   grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.2fr);
@@ -2113,6 +2117,49 @@ body {
   gap: 12px;
 }
 
+.ai-song-mode-group {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ai-mode-button {
+  display: grid;
+  gap: 3px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid #dcebe7;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #44515f;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-mode-button b,
+.ai-mode-button small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-mode-button b {
+  color: #172235;
+  font-size: 14px;
+}
+
+.ai-mode-button small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ai-mode-button.active {
+  border-color: #56b9a8;
+  background: #eefaf6;
+  box-shadow: inset 0 0 0 1px rgba(19, 185, 129, 0.16);
+}
+
 .ai-song-search input {
   width: 100%;
   height: 44px;
@@ -2124,6 +2171,10 @@ body {
 
 .ai-song-results {
   margin-top: 16px;
+}
+
+.ai-song-results:empty {
+  display: none;
 }
 
 .ai-song-loading,
@@ -2156,9 +2207,15 @@ body {
   color: var(--accent);
 }
 
+.ai-song-analysis {
+  margin: 0 0 12px;
+  color: #526478;
+  line-height: 1.7;
+}
+
 .ai-song-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -2167,7 +2224,7 @@ body {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
   gap: 10px;
-  min-height: 132px;
+  min-height: 210px;
   padding: 12px;
   border: 1px solid #dcebe7;
   border-radius: 12px;
@@ -2214,7 +2271,43 @@ body {
 
 .ai-song-score b {
   color: var(--accent);
-  font-size: 22px;
+  font-size: 18px;
+}
+
+.ai-song-tags,
+.ai-song-reason,
+.ai-song-trend {
+  grid-column: 1 / -1;
+}
+
+.ai-song-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-song-tags i {
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #edf7f4;
+  color: #277465;
+  font-size: 12px;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-song-reason,
+.ai-song-trend {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.ai-song-trend {
+  color: #526478;
 }
 
 .ai-song-rank {
@@ -2257,6 +2350,25 @@ body {
 
 .explorer-hero {
   margin-bottom: 16px;
+}
+
+.explore-section-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 2px 0 12px;
+}
+
+.explore-section-head h2 {
+  margin: 0;
+  color: #152033;
+  font-size: 18px;
+}
+
+.explore-section-head span {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .explorer-hero .score-panel {
@@ -2422,6 +2534,7 @@ body {
   .song-card-strip,
   .ai-song-search,
   .ai-song-search-controls,
+  .ai-song-mode-group,
   .ai-song-grid {
     grid-template-columns: 1fr;
   }

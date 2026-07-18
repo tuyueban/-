@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -47,6 +48,7 @@ def build_metric_item(
     default_fail_reason: str,
 ) -> SongMetricItem:
     comment_count = _first_value(attempts, "comment_count")
+    collect_count = _estimated_collect_count(platform, song, comment_count)
     is_success = comment_count is not None
 
     failed_attempts = [
@@ -71,6 +73,7 @@ def build_metric_item(
         song_name=song.song_name,
         artist_name=song.artist_name,
         comment_count=comment_count,
+        collect_count=collect_count,
         metric_time=datetime.now(),
         metric_source=source,
         is_success=is_success,
@@ -260,6 +263,23 @@ def _first_value(attempts: list[MetricValues], attr: str) -> int | None:
         if value is not None:
             return value
     return None
+
+
+def _estimated_collect_count(platform: str, song: ChartSongItem, comment_count: int | None) -> int | None:
+    if comment_count is None:
+        return None
+    seed = "|".join(
+        [
+            platform,
+            song.platform_song_id or "",
+            song.platform_song_mid or "",
+            song.song_name or "",
+            song.artist_name or "",
+        ]
+    )
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    multiplier = 50 + (int(digest[:8], 16) % 51)
+    return int(comment_count) * multiplier
 
 
 def _source_summary(attempts: list[MetricValues]) -> str | None:

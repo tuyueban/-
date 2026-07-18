@@ -151,9 +151,12 @@ def _platform_snapshot(spec: PlatformSpec, keyword: str) -> dict[str, Any]:
         print(f"{spec.name}结果：{song.artist_name} - {song.song_name}")
 
         comment_count = None
+        collect_count = None
         metric_error = None
         try:
-            comment_count = crawler.fetch_metric(song).comment_count
+            metric = crawler.fetch_metric(song)
+            comment_count = metric.comment_count
+            collect_count = metric.collect_count
         except Exception as e:
             metric_error = str(e)
             print(f"{spec.name} comment failed")
@@ -179,6 +182,7 @@ def _platform_snapshot(spec: PlatformSpec, keyword: str) -> dict[str, Any]:
             "cover_url": song.cover_url,
             "song_url": song.song_url,
             "comment_count": comment_count,
+            "collect_count": collect_count,
             "in_chart": bool(charts),
             "chart_name": charts[0]["chart_name"] if charts else None,
             "rank": charts[0]["rank"] if charts else None,

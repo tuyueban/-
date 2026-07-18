@@ -182,6 +182,7 @@ class SongRepository:
         values = {
             "platform_song_id": item.platform_song_id,
             "comment_count": item.comment_count,
+            "collect_count": int(item.collect_count or 0),
             "metric_date": metric_date,
             "collect_time": item.metric_time,
             "metric_source": item.metric_source,
@@ -191,6 +192,7 @@ class SongRepository:
         if existing:
             if existing.comment_count is not None and item.comment_count is None:
                 values.pop("comment_count", None)
+                values.pop("collect_count", None)
                 values["is_success"] = True
             for key, value in values.items():
                 setattr(existing, key, value)

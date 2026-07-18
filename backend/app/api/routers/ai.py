@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -33,6 +33,7 @@ class ArtistHeatAnalysisRequest(BaseModel):
 
 class AiSongSearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
+    mode: Literal["style", "emotion", "trend"] = "style"
 
 
 def _analysis_response(item: dict[str, Any] | None) -> dict[str, Any]:
@@ -81,4 +82,4 @@ def analyze_artist_heat(payload: ArtistHeatAnalysisRequest) -> dict[str, Any]:
 @router.post("/song-search")
 def song_search(payload: AiSongSearchRequest) -> dict[str, Any]:
     with AiSongSearchService() as service:
-        return service.search(payload.query, limit=5)
+        return service.search(payload.query, limit=5, mode=payload.mode)

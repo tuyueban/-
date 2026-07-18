@@ -118,6 +118,7 @@ class SongMetric(Base):
     play_count: Mapped[int | None] = mapped_column(BigInteger)
     favorite_count: Mapped[int | None] = mapped_column(BigInteger)
     comment_count: Mapped[int | None] = mapped_column(BigInteger)
+    collect_count: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     metric_date: Mapped[Date] = mapped_column(Date, nullable=False)
     collect_time: Mapped[DateTime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     metric_source: Mapped[str | None] = mapped_column(Unicode(500))

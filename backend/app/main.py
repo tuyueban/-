@@ -16,6 +16,7 @@ from app.api.routers import (
     heat_router,
     ops_router,
     reports_router,
+    song_alias_router,
     songs_router,
 )
 from app.core.config import settings
@@ -47,6 +48,7 @@ app.add_middleware(
 app.include_router(charts_router, prefix=settings.api_prefix)
 app.include_router(ai_router, prefix=settings.api_prefix)
 app.include_router(songs_router, prefix=settings.api_prefix)
+app.include_router(song_alias_router, prefix=settings.api_prefix)
 app.include_router(artists_router, prefix=settings.api_prefix)
 app.include_router(analytics_router, prefix=settings.api_prefix)
 app.include_router(reports_router, prefix=settings.api_prefix)

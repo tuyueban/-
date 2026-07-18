@@ -76,6 +76,7 @@ class SongMetricItem:
     song_name: str | None = None
     artist_name: str | None = None
     comment_count: int | None = None
+    collect_count: int | None = None
     metric_source: str | None = None
     fail_reason: str | None = None
 
@@ -111,6 +112,10 @@ class PlatformCrawlResult:
         return sum(1 for metric in self.metrics if metric.comment_count is not None)
 
     @property
+    def collect_count_success_count(self) -> int:
+        return sum(1 for metric in self.metrics if metric.collect_count is not None)
+
+    @property
     def failed_metric_count(self) -> int:
         return max(0, self.metric_count - self.success_metric_count)
 
@@ -118,4 +123,5 @@ class PlatformCrawlResult:
         total = self.metric_count or 1
         return {
             "comment_count_success_rate": round(self.comment_count_success_count / total, 4),
+            "collect_count_success_rate": round(self.collect_count_success_count / total, 4),
         }

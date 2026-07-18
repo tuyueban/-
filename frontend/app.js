@@ -50,6 +50,7 @@ const state = {
     sessionId: "",
     result: null,
     aiSearch: null,
+    aiExploreMode: "style",
   },
   ai: {
     song: null,
@@ -108,6 +109,10 @@ function toast(message) {
   window.setTimeout(() => node.classList.remove("active"), 2600);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -163,6 +168,31 @@ const MAIN_PLATFORMS = [
   { code: "qq", name: "QQ音乐", color: "#f2994a" },
   { code: "kugou", name: "酷狗音乐", color: "#2f80ed" },
 ];
+
+const AI_EXPLORE_MODES = [
+  { code: "style", label: "相似风格", detail: "曲风、元素、歌手风格" },
+  { code: "emotion", label: "相似情绪", detail: "情绪、歌词、场景心理" },
+  { code: "trend", label: "热门趋势", detail: "热度、排名、传播潜力" },
+];
+
+function aiExploreModeLabel(mode) {
+  return AI_EXPLORE_MODES.find((item) => item.code === mode)?.label || AI_EXPLORE_MODES[0].label;
+}
+
+function currentAiExploreMode() {
+  return AI_EXPLORE_MODES.some((item) => item.code === state.explorer.aiExploreMode)
+    ? state.explorer.aiExploreMode
+    : "style";
+}
+
+function setAiExploreMode(mode) {
+  state.explorer.aiExploreMode = AI_EXPLORE_MODES.some((item) => item.code === mode) ? mode : "style";
+  document.querySelectorAll("[data-ai-song-mode]").forEach((button) => {
+    const active = button.dataset.aiSongMode === state.explorer.aiExploreMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
 
 function platformShort(value) {
   const shorts = {
@@ -603,6 +633,27 @@ function listConfig(key) {
   return configs[key] || configs.daily;
 }
 
+function listEndpoint(key) {
+  const endpoints = {
+    daily: "/api/charts/daily-hot?limit=50",
+    weekly: "/api/charts/weekly-hot?limit=50",
+    artists: "/api/artists/rank?limit=50",
+    rising: "/api/charts/rising?limit=50",
+    newSongs: "/api/charts/new-songs?limit=50",
+    interaction: "/api/charts/interaction-heat?limit=50",
+  };
+  return endpoints[key] || endpoints.daily;
+}
+
+function setListItems(key, items) {
+  if (key === "daily") state.daily = items;
+  if (key === "weekly") state.weekly = items;
+  if (key === "artists") state.artists = items;
+  if (key === "rising") state.rising = items;
+  if (key === "newSongs") state.newSongs = items;
+  if (key === "interaction") state.interactionHeat = items;
+}
+
 function songCell(item) {
   const songName = songDisplayName(item);
   return tableIdentityHtml({
@@ -686,6 +737,17 @@ function openList(key) {
   switchView("list");
   $("#listEyebrow").textContent = config.eyebrow;
   $("#listTitle").textContent = config.title;
+  if (!config.items.length) {
+    $("#listContent").innerHTML = `<p class="muted">榜单加载中...</p>`;
+    api(listEndpoint(key)).then((data) => {
+      const items = data?.items || [];
+      setListItems(key, items);
+      if (state.activeList === key) openList(key);
+    }).catch((error) => {
+      $("#listContent").innerHTML = emptyText(`榜单加载失败：${error.message}`);
+    });
+    return;
+  }
   if (config.type === "artist") {
     $("#listContent").innerHTML = renderArtistListTable(config.items);
   } else if (config.type === "rising") {
@@ -1167,18 +1229,8 @@ function renderCrossPlatformAnalysis() {
   `;
 }
 
-function explorerInitialHtml() {
-  return `
-    <article class="panel explorer-empty">
-      <p class="muted">输入任意歌曲名或“歌曲 歌手”，开始实时分析。</p>
-      <div class="tag-row">
-        ${["晴天", "晴天 周杰伦", "有何不可", "修炼爱情 林俊杰"].map((item) => (
-          `<button class="tag explore-example" type="button" data-explore-keyword="${escapeHtml(item)}">${escapeHtml(item)}</button>`
-        )).join("")}
-      </div>
-    </article>
-  `;
-}
+
+
 
 function renderSongExplorer(content = "") {
   const node = $("#exploreContent");
@@ -1189,40 +1241,48 @@ function aiSongSearchLoadingHtml() {
   return `
     <div class="ai-song-loading">
       <span></span>
-      <b>AI 正在理解你的描述并检索歌曲...</b>
+      <b>AI正在扩大探索范围，为你发现相关歌曲</b>
     </div>
   `;
 }
 
-function renderAiSongSearchResults(data) {
-  const node = $("#aiSongSearchResults");
-  if (!node) return;
+function aiSongSearchResultsHtml(data, limit = 5) {
   const songs = Array.isArray(data?.songs) ? data.songs : [];
-  if (!songs.length) {
-    node.innerHTML = `<p class="ai-song-empty">未找到符合条件的歌曲，请尝试其他描述。</p>`;
-    return;
+  const results = Array.isArray(data?.results) ? data.results : [];
+  const explorations = Array.isArray(data?.explorations) ? data.explorations : [];
+  const displayItems = (results.length ? results : explorations).slice(0, limit);
+  const songItems = songs.slice(0, limit);
+  if (!songs.length && !displayItems.length) {
+    return `<p class="ai-song-empty">AI正在扩大探索范围，为你发现相关歌曲</p>`;
   }
-  node.innerHTML = `
+  return `
     <div class="ai-song-result-head">
-      <span>识别意图：<b>${escapeHtml(data.intent || "--")}</b></span>
-      <small>按综合热度降序推荐 ${songs.length} 首</small>
+      <span>${escapeHtml(data.mode_label || aiExploreModeLabel(currentAiExploreMode()))}</span>
+      <small>${data.expanded ? "已扩大探索范围" : "已匹配相关歌曲"} · ${displayItems.length || songItems.length} 首</small>
     </div>
+    ${data.analysis ? `<p class="ai-song-analysis">${escapeHtml(data.analysis)}</p>` : ""}
     <div class="ai-song-grid">
-      ${songs.map((song) => {
+      ${(displayItems.length ? displayItems : songItems).map((result, index) => {
+        const song = songs[index] || {};
         const chartText = song.chart_name || (Array.isArray(song.charts) && song.charts[0]?.chart_name) || "";
+        const exploration = explorations[index] || result || {};
+        const tags = Array.isArray(exploration.tags) ? exploration.tags : [];
         return `
           <button class="ai-song-card" type="button" data-song-id="${song.song_id || ""}">
-            ${thumbHtml(song.cover_url, song.song_name, "item-cover")}
+            ${thumbHtml(song.cover_url, result.song || song.song_name, "item-cover")}
             <span class="ai-song-card-copy">
-              <b>${escapeHtml(song.song_name || "--")}</b>
-              <small>${escapeHtml(song.artist_name || "--")}</small>
+              <b>${escapeHtml(result.song || song.song_name || "--")}</b>
+              <small>${escapeHtml(result.artist || song.artist_name || "--")}</small>
               <small>风格：${escapeHtml(song.style || "--")}</small>
               ${chartText ? `<small>榜单：${escapeHtml(chartText)}</small>` : ""}
             </span>
             <span class="ai-song-score">
-              <b>${formatNumber(song.heat_score)}</b>
-              <small>综合热度</small>
+              <b>${escapeHtml(result.similarity || exploration.similarity || formatNumber(song.heat_score))}</b>
+              <small>${exploration.similarity ? "AI 匹配" : "综合热度"}</small>
             </span>
+            ${tags.length ? `<span class="ai-song-tags">${tags.map((tag) => `<i>${escapeHtml(tag)}</i>`).join("")}</span>` : ""}
+            ${(result.reason || exploration.reason) ? `<span class="ai-song-reason">${escapeHtml(result.reason || exploration.reason)}</span>` : ""}
+            ${exploration.trend_analysis ? `<span class="ai-song-trend">${escapeHtml(exploration.trend_analysis)}</span>` : ""}
             <span class="ai-song-rank">#${formatNumber(song.rank || 0)}</span>
           </button>
         `;
@@ -1231,15 +1291,45 @@ function renderAiSongSearchResults(data) {
   `;
 }
 
-async function searchAiSongs(query) {
+function renderAiSongSearchResults(data) {
   const node = $("#aiSongSearchResults");
+  if (!node) return;
+  node.innerHTML = aiSongSearchResultsHtml(data);
+}
+
+function renderExploreRecommendations(data) {
+  const node = $("#exploreRecommendations");
+  if (!node) return;
+  node.innerHTML = aiSongSearchResultsHtml(data, 5);
+}
+
+async function loadExploreRecommendations(query, mode = currentAiExploreMode()) {
+  const node = $("#exploreRecommendations");
   if (node) node.innerHTML = aiSongSearchLoadingHtml();
+  try {
+    const data = await fetchAiSongRecommendations(query, mode);
+    state.explorer.aiSearch = data;
+    renderExploreRecommendations(data);
+  } catch (error) {
+    console.warn("Explorer recommendation request failed", error);
+    if (node) node.innerHTML = `<p class="ai-song-empty">AI推荐暂时不可用，请稍后重试。</p>`;
+  }
+}
+
+async function fetchAiSongRecommendations(query, mode = currentAiExploreMode()) {
   const data = await api("/api/ai/song-search", {
     method: "POST",
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, mode }),
   });
   state.explorer.aiSearch = data;
-  renderAiSongSearchResults(data);
+  return data;
+}
+
+async function searchAiSongs(query, mode = currentAiExploreMode()) {
+  setAiExploreMode(mode);
+  const node = $("#aiSongSearchResults");
+  if (node) node.innerHTML = "";
+  await searchExploreSong(query, mode);
 }
 
 function explorerPlatforms(result) {
@@ -1266,7 +1356,7 @@ function renderExplorerResult(result) {
         <div class="meta-grid">
           ${song.album_name ? `<span>专辑：${escapeHtml(song.album_name)}</span>` : ""}
           ${song.release_time ? `<span>发行时间：${escapeHtml(song.release_time)}</span>` : ""}
-          <span>覆盖平台：${platforms.filter((item) => item.found).length}/3</span>
+          <span>覆盖平台：${escapeHtml(song.coverage_summary || `${platforms.filter((item) => item.found).length}/3`)}</span>
         </div>
       </div>
       <div class="score-panel">
@@ -1276,6 +1366,11 @@ function renderExplorerResult(result) {
         </div>
       </div>
     </article>
+
+    <div class="explore-section-head">
+      <h2>跨平台热度分析</h2>
+      <span>平台覆盖、收藏、评论与榜单表现</span>
+    </div>
 
     <section class="three-column explorer-platform-grid">
       ${platforms.map(renderPlatformAnalysis).join("")}
@@ -1296,6 +1391,11 @@ function renderExplorerResult(result) {
       <div class="panel-head"><h2>AI 热度变化分析</h2><span>AI生成</span></div>
       <div id="exploreAiBody">${renderAIHeatAnalysisBlock({ status: "loading" })}</div>
     </article>
+
+    <article class="panel ai-card explore-recommend-card">
+      <div class="panel-head"><h2>AI探索推荐</h2><span>基于当前探索模式</span></div>
+      <div id="exploreRecommendations">${aiSongSearchLoadingHtml()}</div>
+    </article>
   `;
   loadExplorerAI(song.song_name, song.artist_name);
 }
@@ -1303,10 +1403,15 @@ function renderExplorerResult(result) {
 function renderPlatformAnalysis(item) {
   const charts = Array.isArray(item.charts) ? item.charts : [];
   const lines = [
-    `<div><span>状态</span><b>${item.found ? "已找到" : "未找到"}</b></div>`,
+    `<div><span>状态</span><b>${escapeHtml(item.status_label || (item.found ? "已找到" : "未找到"))}</b></div>`,
+    item.comment_label != null ? `<div><span>评论数</span><b>${escapeHtml(item.comment_label)}</b></div>` : "",
     item.comment_count != null ? `<div><span>评论数</span><b>${formatNumber(item.comment_count)}</b></div>` : "",
-    item.found ? `<div><span>榜单</span><b>${charts.length ? "已上榜" : "未进入"}</b></div>` : "",
+    item.collect_label != null ? `<div><span>收藏数</span><b>${escapeHtml(item.collect_label)}</b></div>` : "",
+    item.collect_count != null ? `<div><span>收藏数</span><b>${formatNumber(item.collect_count)}</b></div>` : "",
+    item.chart_status_label || item.found ? `<div><span>榜单</span><b>${escapeHtml(item.chart_status_label || (charts.length ? "已上榜" : "未进入"))}</b></div>` : "",
     charts.length ? `<div><span>最高排名</span><b>${formatNumber(Math.min(...charts.map((chart) => Number(chart.rank || 9999))))}</b></div>` : "",
+    item.coverage_label != null ? `<div><span>平台覆盖</span><b>${escapeHtml(item.coverage_label)}</b></div>` : "",
+    item.note ? `<div><span>说明</span><b>${escapeHtml(item.note)}</b></div>` : "",
   ].filter(Boolean).join("");
   return `
     <article class="platform-artist-card ${platformCode(item.platform)} explorer-platform-card">
@@ -1387,12 +1492,16 @@ function renderPlatformPreferenceDistribution(platforms) {
   `;
 }
 
-async function searchExploreSong(keyword) {
+async function searchExploreSong(keyword, mode = currentAiExploreMode()) {
+  setAiExploreMode(mode);
+  const topResultNode = $("#aiSongSearchResults");
+  if (topResultNode) topResultNode.innerHTML = "";
   renderSongExplorer(`<article class="panel">实时查询三大平台中...</article>`);
   const result = await api(`/api/explore/song/search?keyword=${encodeURIComponent(keyword)}`);
   state.explorer.sessionId = result.session_id || "";
   state.explorer.result = result;
   renderExplorerResult(result);
+  await loadExploreRecommendations(keyword, mode);
 }
 
 async function loadExplorerAI(songName, artistName) {
@@ -1458,10 +1567,12 @@ function songPlatformPerformanceHtml(data) {
                 <span>平台热度：${item.heat_score == null ? "--" : formatNumber(item.heat_score)}</span>
                 <span>进入本次采集榜单：是</span>
                 ${Number(item.comment_count || 0) > 0 ? `<span>评论数：${formatNumber(item.comment_count)}</span>` : ""}
+                ${Number(item.collect_count || 0) > 0 ? `<span>收藏量：${formatNumber(item.collect_count)}</span>` : ""}
               ` : hasPlatformData ? `
                 <span>未进入本次采集榜单</span>
                 <span>已补充平台数据：是</span>
                 ${Number(item.comment_count || 0) > 0 ? `<span>评论数：${formatNumber(item.comment_count)}</span>` : ""}
+                ${Number(item.collect_count || 0) > 0 ? `<span>收藏量：${formatNumber(item.collect_count)}</span>` : ""}
                 ${item.platform_song_id ? `<span>平台歌曲ID：${escapeHtml(item.platform_song_id)}</span>` : ""}
               ` : `
                 <span>未进入本次采集榜单</span>
@@ -1793,6 +1904,16 @@ async function settledRequestMap(requestEntries, warningPrefix) {
   return { data, failed };
 }
 
+function requestWithTimeout(request, ms = 6000) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error("请求超时")), ms);
+  });
+  return Promise.race([request, timeout]).finally(() => {
+    if (timer) window.clearTimeout(timer);
+  });
+}
+
 function aiInsightList(items) {
   return `<ul class="insight-list">${items.filter(Boolean).slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
 }
@@ -2003,44 +2124,68 @@ async function openArtist(artistName) {
   loadArtistAnalysis(artistName, artistAiPayload);
 }
 
-async function loadDashboard() {
-  const requestEntries = [
-    ["dashboard", api("/api/charts/dashboard")],
-    ["daily", api("/api/charts/daily-hot?limit=50")],
-    ["weekly", api("/api/charts/weekly-hot?limit=50")],
-    ["artists", api("/api/artists/rank?limit=50")],
-    ["rising", api("/api/charts/rising?limit=50")],
-    ["newSongs", api("/api/charts/new-songs?limit=50")],
-    ["interactionHeat", api("/api/charts/interaction-heat?limit=50")],
-    ["styleBuckets", api("/api/charts/style-buckets?limit=50")],
-  ];
-  const { data, failed } = await settledRequestMap(requestEntries, "接口加载失败");
-
-  if (!Object.keys(data).length) {
-    throw new Error("全部首页接口加载失败");
+function applyDashboardData(data) {
+  if ("dashboard" in data) state.dashboard = data.dashboard || null;
+  if ("daily" in data || "dashboard" in data) {
+    state.daily = data.daily?.items || data.dashboard?.daily_hot_top10 || state.daily;
   }
-
-  state.dashboard = data.dashboard || null;
-  state.daily = data.daily?.items || data.dashboard?.daily_hot_top10 || [];
-  state.weekly = data.weekly?.items || [];
-  state.weeklyMessage = data.weekly?.message || "";
-  state.artists = data.artists?.items || [];
-  state.rising = data.rising?.items || [];
-  state.newSongs = data.newSongs?.items || [];
-  state.interactionHeat = data.interactionHeat?.items || [];
-  state.styleMeta = data.styleBuckets ? {
-    totalCanonicalSongs: data.styleBuckets.total_canonical_songs || 0,
-    classifiedSongCount: data.styleBuckets.classified_song_count || data.styleBuckets.total_count || 0,
-    unclassifiedSongCount: data.styleBuckets.unclassified_song_count || 0,
-  } : null;
-  state.styleBuckets = normalizeStyleBuckets(data.styleBuckets);
+  if ("weekly" in data) {
+    state.weekly = data.weekly?.items || [];
+    state.weeklyMessage = data.weekly?.message || "";
+  }
+  if ("artists" in data) state.artists = data.artists?.items || [];
+  if ("rising" in data) state.rising = data.rising?.items || [];
+  if ("newSongs" in data) state.newSongs = data.newSongs?.items || [];
+  if ("interactionHeat" in data) state.interactionHeat = data.interactionHeat?.items || [];
+  if ("styleBuckets" in data) {
+    state.styleMeta = {
+      totalCanonicalSongs: data.styleBuckets?.total_canonical_songs || 0,
+      classifiedSongCount: data.styleBuckets?.classified_song_count || data.styleBuckets?.total_count || 0,
+      unclassifiedSongCount: data.styleBuckets?.unclassified_song_count || 0,
+    };
+    state.styleBuckets = normalizeStyleBuckets(data.styleBuckets);
+  }
   setUpdateTime(state.dashboard?.score_date || state.dashboard?.chart_date || "--");
   renderDashboard();
   renderStyleCenter();
+}
+
+function loadDashboardPart(key) {
+  return api(listEndpoint(key)).then((data) => {
+    if (key === "weekly") applyDashboardData({ weekly: data });
+    if (key === "artists") applyDashboardData({ artists: data });
+    if (key === "rising") applyDashboardData({ rising: data });
+    if (key === "newSongs") applyDashboardData({ newSongs: data });
+    if (key === "interaction") applyDashboardData({ interactionHeat: data });
+  }).catch((error) => {
+    console.warn(`首页榜单加载失败：${key}`, error);
+  });
+}
+
+async function loadDashboard() {
+  const primaryEntries = [
+    ["daily", requestWithTimeout(api("/api/charts/daily-hot?limit=50"), 12000)],
+  ];
+  const { data, failed } = await settledRequestMap(primaryEntries, "首页核心接口加载失败");
+
+  if (!Object.keys(data).length) {
+    const daily = await api("/api/charts/daily-hot?limit=50");
+    applyDashboardData({ daily });
+    return;
+  }
+
+  applyDashboardData(data);
 
   if (failed.length) {
     toast(`部分接口加载失败：${failed.join("、")}`);
   }
+
+  ["weekly", "artists", "rising", "newSongs", "interaction"].forEach(loadDashboardPart);
+  api("/api/charts/style-buckets?limit=50").then((styleBuckets) => {
+    applyDashboardData({ styleBuckets });
+  }).catch((error) => {
+    console.warn("首页风格分布加载失败", error);
+  });
 }
 
 async function loadCrossPlatformAnalysis(force = false) {
@@ -2077,6 +2222,18 @@ function retryAIAnalysis(type) {
 }
 
 function bindEvents() {
+  setAiExploreMode(state.explorer.aiExploreMode);
+  const exploreTitle = $("#aiSongSearchForm h3");
+  const exploreDesc = $("#aiSongSearchForm .muted");
+  const exploreInput = $("#aiSongQuery");
+  const exploreButton = $("#aiSongSearchForm .primary-button");
+  const legacyExploreForm = $("#exploreSearchForm");
+  if (exploreTitle) exploreTitle.textContent = "AI音乐探索";
+  if (exploreDesc) exploreDesc.textContent = "输入歌曲名后，先查看歌曲热度分析，再获取相似歌曲推荐。";
+  if (exploreInput) exploreInput.placeholder = "输入歌曲名，如：有何不可、唯一、演员";
+  if (exploreButton) exploreButton.textContent = "开始探索";
+  if (legacyExploreForm) legacyExploreForm.closest(".explorer-search-panel")?.classList.add("legacy-explorer-search-panel");
+
   document.addEventListener("click", (event) => {
     const nav = event.target.closest(".nav-item");
     if (nav?.dataset.view) {
@@ -2123,8 +2280,17 @@ function bindEvents() {
 
     const exploreExample = event.target.closest("[data-explore-keyword]");
     if (exploreExample?.dataset.exploreKeyword) {
-      $("#exploreKeyword").value = exploreExample.dataset.exploreKeyword;
-      searchExploreSong(exploreExample.dataset.exploreKeyword).catch((error) => toast(error.message));
+      if ($("#exploreKeyword")) $("#exploreKeyword").value = exploreExample.dataset.exploreKeyword;
+      if ($("#aiSongQuery")) $("#aiSongQuery").value = exploreExample.dataset.exploreKeyword;
+      searchExploreSong(exploreExample.dataset.exploreKeyword, currentAiExploreMode()).catch((error) => toast(error.message));
+      return;
+    }
+
+    const aiMode = event.target.closest("[data-ai-song-mode]");
+    if (aiMode?.dataset.aiSongMode) {
+      setAiExploreMode(aiMode.dataset.aiSongMode);
+      const query = $("#aiSongQuery")?.value.trim();
+      if (query) searchAiSongs(query, aiMode.dataset.aiSongMode).catch((error) => toast(error.message));
       return;
     }
 
@@ -2162,16 +2328,16 @@ function bindEvents() {
     state.expanded.style = false;
   });
 
-  $("#exploreSearchForm").addEventListener("submit", (event) => {
+  $("#exploreSearchForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
-    const keyword = $("#exploreKeyword").value.trim();
-    if (keyword) searchExploreSong(keyword).catch((error) => toast(error.message));
+    const keyword = $("#exploreKeyword")?.value.trim();
+    if (keyword) searchExploreSong(keyword, currentAiExploreMode()).catch((error) => toast(error.message));
   });
 
   $("#aiSongSearchForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const query = $("#aiSongQuery").value.trim();
-    if (query) searchAiSongs(query).catch((error) => toast(error.message));
+    if (query) searchAiSongs(query, currentAiExploreMode()).catch((error) => toast(error.message));
   });
 
   window.addEventListener("beforeunload", () => cleanupExploreSession(true));

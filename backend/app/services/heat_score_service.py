@@ -7,7 +7,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
-from app.models import Chart, ChartSong, HeatScoreDaily, PlatformSong, Song
+from app.models import Chart, ChartSong, HeatScoreDaily, PlatformSong, Song, SongMetric
 
 
 MAIN_PLATFORM_KEYS = {
@@ -15,6 +15,11 @@ MAIN_PLATFORM_KEYS = {
     "QQ音乐": "qq_score",
     "酷狗音乐": "kugou_score",
 }
+
+
+HEAT_PLATFORM_WEIGHT = 0.55
+HEAT_ENGAGEMENT_WEIGHT = 0.30
+HEAT_COVERAGE_WEIGHT = 0.15
 
 
 class HeatScoreService:
@@ -62,19 +67,20 @@ class HeatScoreService:
                 platform_rows = bucket["platform_ranks"].setdefault(row.platform, [])
                 platform_rows.append(float(row.rank_score or 0))
 
+            metric_map = self._load_metric_map(set(per_song))
+            max_collect_count = max((item["collect_count"] for item in metric_map.values()), default=0)
+            max_comment_count = max((item["comment_count"] for item in metric_map.values()), default=0)
+
             results: list[dict[str, Any]] = []
             for song_id, item in per_song.items():
                 platform_scores = self._calculate_platform_scores(item["platform_ranks"])
-                available_scores = [score for score in platform_scores.values() if score > 0]
-                platform_count = len(available_scores)
-                cross_platform_score = sum(platform_scores.values()) / 3
-                available_platform_avg_score = sum(available_scores) / platform_count if platform_count else 0
-                platform_coverage_score = platform_count / 3 * 100
-                chart_type_score = 100.0
-                heat_score = (
-                    available_platform_avg_score * 0.75
-                    + platform_coverage_score * 0.20
-                    + chart_type_score * 0.05
+                metrics = metric_map.get(song_id, {"collect_count": 0, "comment_count": 0})
+                score = _calculate_static_heat_score(
+                    platform_scores=platform_scores,
+                    collect_count=int(metrics.get("collect_count") or 0),
+                    comment_count=int(metrics.get("comment_count") or 0),
+                    max_collect_count=max_collect_count,
+                    max_comment_count=max_comment_count,
                 )
                 dominant_platform = max(platform_scores, key=platform_scores.get)
 
@@ -85,10 +91,15 @@ class HeatScoreService:
                         "netease_score": platform_scores["网易云音乐"],
                         "qq_score": platform_scores["QQ音乐"],
                         "kugou_score": platform_scores["酷狗音乐"],
-                        "main_platform_score": cross_platform_score,
-                        "heat_score": heat_score,
-                        "platform_count": platform_count,
-                        "platform_coverage_score": platform_coverage_score,
+                        "main_platform_score": score["platform_score"],
+                        "heat_score": score["heat_score"],
+                        "platform_count": score["platform_count"],
+                        "platform_coverage_score": score["coverage_score"],
+                        "engagement_score": score["engagement_score"],
+                        "collect_score": score["collect_score"],
+                        "comment_score": score["comment_score"],
+                        "collect_count": metrics.get("collect_count", 0),
+                        "comment_count": metrics.get("comment_count", 0),
                         "dominant_platform": dominant_platform,
                     }
                 )
@@ -97,12 +108,10 @@ class HeatScoreService:
             if limit:
                 results = results[:limit]
 
-            previous_ranks = self._previous_ranks(current_date)
             for index, item in enumerate(results, start=1):
-                rank_delta = self._rank_delta(previous_ranks.get(item["song_id"]), index)
                 item["rank"] = index
-                item["rank_delta"] = rank_delta
-                item["trend_label"] = self._trend_label(rank_delta, item["heat_score"])
+                item["rank_delta"] = None
+                item["trend_label"] = "静态热度"
                 self._upsert_heat_score(current_date, item)
 
             self.db.commit()
@@ -153,8 +162,28 @@ class HeatScoreService:
                 PlatformSong,
                 and_(PlatformSong.song_id == Song.song_id, PlatformSong.platform == Chart.platform),
             )
-            .where(ChartSong.chart_date == score_date, Chart.chart_type == "hot")
+            .where(ChartSong.chart_date == score_date)
         ).all()
+
+    def _load_metric_map(self, song_ids: set[int]) -> dict[int, dict[str, int]]:
+        if not song_ids:
+            return {}
+        rows = self.db.execute(
+            select(
+                SongMetric.song_id,
+                func.sum(func.coalesce(SongMetric.collect_count, 0)).label("collect_count"),
+                func.sum(func.coalesce(SongMetric.comment_count, 0)).label("comment_count"),
+            )
+            .where(SongMetric.song_id.in_(song_ids))
+            .group_by(SongMetric.song_id)
+        ).all()
+        return {
+            int(row.song_id): {
+                "collect_count": int(row.collect_count or 0),
+                "comment_count": int(row.comment_count or 0),
+            }
+            for row in rows
+        }
 
     def _calculate_platform_scores(
         self,
@@ -165,25 +194,6 @@ class HeatScoreService:
             rank_scores = platform_ranks.get(platform, [])
             scores[platform] = max(rank_scores) if rank_scores else 0
         return scores
-
-    def _previous_ranks(self, score_date: date) -> dict[int, int]:
-        previous_date = self.db.execute(
-            select(func.max(HeatScoreDaily.score_date)).where(HeatScoreDaily.score_date < score_date)
-        ).scalar_one_or_none()
-        if previous_date is None:
-            return {}
-        rows = self.db.execute(
-            select(HeatScoreDaily.song_id, HeatScoreDaily.rank).where(
-                HeatScoreDaily.score_date == previous_date
-            )
-        ).all()
-        return {song_id: rank for song_id, rank in rows if rank is not None}
-
-    @staticmethod
-    def _rank_delta(previous_rank: int | None, current_rank: int) -> int | None:
-        if previous_rank is None:
-            return None
-        return previous_rank - current_rank
 
     @staticmethod
     def _trend_label(rank_delta: int | None, heat_score: float) -> str:
@@ -244,6 +254,11 @@ class HeatScoreService:
             "platform_coverage_score": _round(item.get("platform_coverage_score")),
             "dominant_platform": item.get("dominant_platform"),
             "trend_label": item["trend_label"],
+            "engagement_score": _round(item.get("engagement_score")),
+            "collect_score": _round(item.get("collect_score")),
+            "comment_score": _round(item.get("comment_score")),
+            "collect_count": int(item.get("collect_count") or 0),
+            "comment_count": int(item.get("comment_count") or 0),
         }
 
     @staticmethod
@@ -268,8 +283,49 @@ class HeatScoreService:
         }
 
 
+def _calculate_static_heat_score(
+    *,
+    platform_scores: dict[str, float],
+    collect_count: int,
+    comment_count: int,
+    max_collect_count: int,
+    max_comment_count: int,
+) -> dict[str, float | int]:
+    platform_values = [_normalize_score(value) for value in platform_scores.values() if float(value or 0) > 0]
+    platform_count = min(len(platform_values), 3)
+    platform_score = sum(platform_values) / len(platform_values) if platform_values else 0.0
+    collect_score = _normalize_count(collect_count, max_collect_count)
+    comment_score = _normalize_count(comment_count, max_comment_count)
+    engagement_score = collect_score * 0.6 + comment_score * 0.4
+    coverage_score = platform_count / 3 * 100
+    heat_score = (
+        platform_score * HEAT_PLATFORM_WEIGHT
+        + engagement_score * HEAT_ENGAGEMENT_WEIGHT
+        + coverage_score * HEAT_COVERAGE_WEIGHT
+    )
+    return {
+        "heat_score": _round(heat_score),
+        "platform_score": _round(platform_score),
+        "engagement_score": _round(engagement_score),
+        "coverage_score": _round(coverage_score),
+        "collect_score": _round(collect_score),
+        "comment_score": _round(comment_score),
+        "platform_count": platform_count,
+    }
+
+
+def _normalize_count(value: int | float | None, max_value: int | float | None) -> float:
+    if not value or not max_value or float(max_value) <= 0:
+        return 0.0
+    return _normalize_score(float(value) / float(max_value) * 100)
+
+
+def _normalize_score(value: int | float | None) -> float:
+    return max(0.0, min(100.0, float(value or 0)))
+
+
 def _round(value: float) -> float:
-    return round(float(value or 0), 2)
+    return round(_normalize_score(value), 2)
 
 
 def _platform_count(score: HeatScoreDaily) -> int:

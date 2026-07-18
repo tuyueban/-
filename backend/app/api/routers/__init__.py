@@ -7,7 +7,7 @@ from app.api.routers.explore import router as explore_router
 from app.api.routers.heat import router as heat_router
 from app.api.routers.ops import router as ops_router
 from app.api.routers.reports import router as reports_router
-from app.api.routers.songs import router as songs_router
+from app.api.routers.songs import router as songs_router, song_alias_router
 
 __all__ = [
     "analytics_router",
@@ -19,5 +19,6 @@ __all__ = [
     "heat_router",
     "ops_router",
     "reports_router",
+    "song_alias_router",
     "songs_router",
 ]

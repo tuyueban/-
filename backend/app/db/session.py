@@ -61,6 +61,7 @@ def ensure_schema_extensions() -> None:
     song_metric_columns = {
         "play_count": "BIGINT NULL",
         "favorite_count": "BIGINT NULL",
+        "collect_count": "BIGINT NOT NULL DEFAULT 0",
     }
     artist_chart_columns = {
         "style_key": "VARCHAR(50) NULL",

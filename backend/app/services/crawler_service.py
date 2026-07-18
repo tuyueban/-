@@ -217,6 +217,7 @@ class CrawlerService:
             "metric_count": result.metric_count,
             "success_metric_count": result.success_metric_count,
             "comment_count_success_count": result.comment_count_success_count,
+            "collect_count_success_count": result.collect_count_success_count,
             "failed_metric_count": result.failed_metric_count,
             **result.field_success_rates(),
             "errors": result.errors,
@@ -229,10 +230,15 @@ def _aggregate_field_rates(platform_results: list[dict[str, object]]) -> dict[st
     if metric_count <= 0:
         return {
             "comment_count_success_rate": 0,
+            "collect_count_success_rate": 0,
         }
     return {
         "comment_count_success_rate": round(
             sum(int(item.get("comment_count_success_count", 0)) for item in platform_results) / metric_count,
+            4,
+        ),
+        "collect_count_success_rate": round(
+            sum(int(item.get("collect_count_success_count", 0)) for item in platform_results) / metric_count,
             4,
         ),
     }

@@ -268,12 +268,12 @@ class AnalyticsService:
                 "metric_records": self.db.execute(select(func.count()).select_from(SongMetric)).scalar_one(),
             },
             "daily_hot_top10": self.daily_hot(score_date, limit=10) if score_date else [],
-            "rising_top10": self.rising(score_date, limit=10) if score_date else [],
-            "weekly_hot_top10": self.weekly_hot(score_date, limit=10) if score_date else [],
-            "new_song_top10": self.new_songs(chart_date, limit=10) if chart_date else [],
-            "interaction_heat_top10": self.interaction_heat(chart_date, limit=10) if chart_date else [],
-            "artist_top10": self.artist_rank(score_date, limit=10) if score_date else [],
-            "platform_records": self.platform_record_counts(chart_date) if chart_date else [],
+            "rising_top10": [],
+            "weekly_hot_top10": [],
+            "new_song_top10": [],
+            "interaction_heat_top10": [],
+            "artist_top10": [],
+            "platform_records": [],
             "latest_report": latest_report,
         }
 
@@ -332,11 +332,10 @@ class AnalyticsService:
             .join(Song, HeatScoreDaily.song_id == Song.song_id)
             .where(HeatScoreDaily.score_date == current_date)
             .order_by(desc(HeatScoreDaily.heat_score))
+            .limit(limit)
         ).all()
         self._prime_song_display_cache([song for _score, song in rows])
-        items = _merge_song_items([self._heat_row(score, song) for score, song in rows])
-        items.sort(key=lambda item: (item.get("adjustedHeat") or item.get("adjusted_heat") or 0), reverse=True)
-        return _rerank(items)[:limit]
+        return _rerank([self._heat_row(score, song) for score, song in rows])
 
     def weekly_hot(self, end_date: date | None = None, limit: int = 50) -> list[dict[str, Any]]:
         current_date = end_date or self.latest_score_date()
@@ -554,6 +553,7 @@ class AnalyticsService:
                 {
                     "platform": metric.platform,
                     "comment_count": metric.comment_count,
+                    "collect_count": int(metric.collect_count or 0),
                     "metric_date": metric.metric_date.isoformat(),
                     "is_success": bool(metric.is_success),
                     "fail_reason": metric.fail_reason,
@@ -561,6 +561,26 @@ class AnalyticsService:
                 for metric in metric_rows
             ],
             "trend": [self._heat_score_only(row) for row in trend_rows],
+        }
+
+    def song_collect(self, song_id: int, platform: str = "netease") -> dict[str, Any] | None:
+        song = self.db.get(Song, song_id)
+        if song is None:
+            return None
+        platform_code = _platform_code(platform)
+        metrics = self.db.execute(
+            select(SongMetric)
+            .where(SongMetric.song_id == song_id)
+            .order_by(desc(SongMetric.metric_date), desc(SongMetric.collect_time))
+        ).scalars().all()
+        selected = next((metric for metric in metrics if _platform_code(metric.platform) == platform_code), None)
+        selected = selected or (metrics[0] if metrics else None)
+        return {
+            "song": song.song_name,
+            "artist": song.artist_name,
+            "platform": selected.platform if selected else _platform_display_name(platform_code),
+            "collect_count": int(selected.collect_count or 0) if selected else 0,
+            "update_time": selected.collect_time.isoformat(timespec="seconds") if selected else None,
         }
 
     def search_songs(self, keyword: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -1202,20 +1222,23 @@ class AnalyticsService:
                 break
 
         song_ids = set(matched.get("song_ids") or [song_id]) if matched else {song_id}
-        metric_map = self._latest_comment_metric_map(song_ids)
+        metric_map = self._latest_metric_map(song_ids)
         platform_song_map = self._platform_song_snapshot_map(song_ids)
         platforms = []
         for platform in ("netease", "qq", "kugou"):
             platform_item = None
             if matched and platform in (matched.get("source_platforms") or []):
                 platform_item = matched
-            comment_count = metric_map.get(platform)
+            metric_values = metric_map.get(platform) or {}
+            comment_count = metric_values.get("comment_count")
+            collect_count = metric_values.get("collect_count")
             has_comment = comment_count is not None and comment_count > 0
+            has_collect = collect_count is not None and collect_count > 0
             platform_song = platform_song_map.get(platform)
             row = {
                 "platform": platform,
                 "platform_name": _platform_display_name(platform),
-                "has_platform_data": platform_song is not None or has_comment,
+                "has_platform_data": platform_song is not None or has_comment or has_collect,
                 "platform_song_id": platform_song.platform_song_id if platform_song else None,
                 "platform_song_mid": platform_song.platform_song_mid if platform_song else None,
                 "song_url": platform_song.song_url if platform_song else None,
@@ -1226,7 +1249,8 @@ class AnalyticsService:
                 "heat_score": None,
                 "in_current_chart": False,
                 "comment_count": comment_count if has_comment else None,
-                "available_metrics": ["comment_count"] if has_comment else [],
+                "collect_count": collect_count if has_collect else None,
+                "available_metrics": _available_metric_names(has_comment, has_collect),
             }
             if platform_item:
                 chart_names = platform_item.get("platform_chart_names", {}).get(platform) or platform_item.get("chart_names") or []
@@ -1477,6 +1501,13 @@ class AnalyticsService:
         return {row.song_id: _float(row.heat_score) for row in rows}
 
     def _latest_comment_metric_map(self, song_ids: set[int]) -> dict[str, int]:
+        return {
+            platform: int(values["comment_count"])
+            for platform, values in self._latest_metric_map(song_ids).items()
+            if values.get("comment_count") is not None
+        }
+
+    def _latest_metric_map(self, song_ids: set[int]) -> dict[str, dict[str, int]]:
         if not song_ids:
             return {}
         latest_metric_date = self.db.execute(
@@ -1485,19 +1516,27 @@ class AnalyticsService:
         if latest_metric_date is None:
             return {}
         rows = self.db.execute(
-            select(SongMetric.platform, func.max(SongMetric.comment_count).label("comment_count"))
+            select(
+                SongMetric.platform,
+                func.max(SongMetric.comment_count).label("comment_count"),
+                func.max(SongMetric.collect_count).label("collect_count"),
+            )
             .where(
                 SongMetric.song_id.in_(song_ids),
                 SongMetric.metric_date == latest_metric_date,
-                SongMetric.comment_count.is_not(None),
             )
             .group_by(SongMetric.platform)
         ).all()
-        return {
-            _platform_code(row.platform): int(row.comment_count)
-            for row in rows
-            if row.comment_count is not None and int(row.comment_count) > 0
-        }
+        result: dict[str, dict[str, int]] = {}
+        for row in rows:
+            values: dict[str, int] = {}
+            if row.comment_count is not None and int(row.comment_count) > 0:
+                values["comment_count"] = int(row.comment_count)
+            if row.collect_count is not None and int(row.collect_count) > 0:
+                values["collect_count"] = int(row.collect_count)
+            if values:
+                result[_platform_code(row.platform)] = values
+        return result
 
     def _chart_songs_by_type(self, chart_date: date, chart_type: str, limit: int) -> list[dict[str, Any]]:
         rows = self.db.execute(
@@ -2003,6 +2042,14 @@ def _platform_display_name(platform: str | None) -> str:
     }
     code = _platform_code(platform)
     return names.get(code, platform or "未知平台")
+
+def _available_metric_names(has_comment: bool, has_collect: bool) -> list[str]:
+    names = []
+    if has_comment:
+        names.append("comment_count")
+    if has_collect:
+        names.append("collect_count")
+    return names
 
 def _style_for_song_chart(song: Song, chart: Chart) -> tuple[str, str | None]:
     candidates = _style_candidates(song, chart)

@@ -4,6 +4,7 @@ from app.api.route_utils import analytics_call, detail_ai_call, items_response, 
 
 
 router = APIRouter(prefix="/songs", tags=["songs"])
+song_alias_router = APIRouter(prefix="/song", tags=["songs"])
 
 
 @router.get("/search")
@@ -21,6 +22,15 @@ def song_detail(song_id: int) -> dict[str, object]:
 def song_platform_performance(song_id: int, chart_type: str = "hot") -> dict[str, object]:
     return require_found(
         analytics_call(lambda service: service.song_platform_performance(song_id=song_id, chart_type=chart_type)),
+        "Song not found",
+    )
+
+
+@router.get("/{song_id}/collect")
+@song_alias_router.get("/{song_id}/collect")
+def song_collect(song_id: int, platform: str = "netease") -> dict[str, object]:
+    return require_found(
+        analytics_call(lambda service: service.song_collect(song_id=song_id, platform=platform)),
         "Song not found",
     )
 

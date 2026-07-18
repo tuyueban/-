@@ -56,8 +56,7 @@ music_hot_analysis/
 当前日热度计算核心口径：
 
 ```text
-heat_score =
-available_platform_avg_score * 0.75
+heat_score =available_platform_avg_score * 0.75
 + platform_coverage_score * 0.20
 + chart_type_score * 0.05
 ```
